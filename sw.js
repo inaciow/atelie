@@ -1,4 +1,4 @@
-const V = 'atelie-2';
+const V = 'atelie-3';
 const BASE = ['./', 'index.html', 'app.js', 'cfg.js', 'manifest.webmanifest', 'icon-192.png', 'icon-512.png', 'apple-touch-icon.png'];
 const EXT = /^https:\/\/(www\.gstatic\.com\/firebasejs\/|cdnjs\.cloudflare\.com\/|fonts\.googleapis\.com\/|fonts\.gstatic\.com\/)/;
 
@@ -15,10 +15,14 @@ self.addEventListener('fetch', e => {
   const meu = u.origin === location.origin;
   if (!meu && !EXT.test(r.url)) return;
   e.respondWith(caches.open(V).then(async c => {
-    const hit = await c.match(r, {ignoreSearch: meu});
-    const rede = fetch(r).then(res => { if (res && (res.ok || res.type === 'opaque')) c.put(r, res.clone()); return res; }).catch(() => null);
-    if (hit) { e.waitUntil(rede); return hit; }
-    const res = await rede;
-    return res || (r.mode === 'navigate' ? c.match('index.html') : new Response('', {status: 504}));
+    if (meu) {
+      try { const res = await fetch(r, {cache: 'no-cache'}); if (res && res.ok) c.put(r, res.clone()); return res; }
+      catch { return (await c.match(r, {ignoreSearch: true})) || (r.mode === 'navigate' ? c.match('index.html') : new Response('', {status: 504})); }
+    }
+    const hit = await c.match(r);
+    if (hit) return hit;
+    const res = await fetch(r).catch(() => null);
+    if (res && (res.ok || res.type === 'opaque')) c.put(r, res.clone());
+    return res || new Response('', {status: 504});
   }));
 });
