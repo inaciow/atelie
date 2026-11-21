@@ -336,7 +336,7 @@ function cardPedido(p, pos, primeiro, ultimo) {
 function vFila() {
   const at = ativosOrd(), saiu = vivos('pedidos').filter(p => SAIU.includes(p.status)).sort((a, b) => (b.entregueEm || '').localeCompare(a.entregueEm || ''));
   return `<div class="head"><h2>Fila (${at.length})</h2><span class="sp"></span><button class="btn pri" data-a="novoPedido">+ Pedido</button></div>
-  <div class="lista">${at.length ? at.map((p, i) => cardPedido(p, i + 1, i === 0, i === at.length - 1)).join('') : '<div class="empty card">Fila vazia. Toque em + Pedido.</div>'}</div>
+  <div class="lista">${at.length ? at.map((p, i) => cardPedido(p, i + 1, i === 0, i === at.length - 1)).join('') : '<div class="empty">Fila vazia. Toque em + Pedido.</div>'}</div>
   ${saiu.length ? `<details ${S.verSaiu ? 'open' : ''} data-t="verSaiu"><summary>Entregues e cancelados (${saiu.length})</summary><div class="lista" style="margin-top:10px">${saiu.map(p => cardPedido(p, 0)).join('')}</div></details>` : ''}`;
 }
 function vHoras() {
@@ -421,7 +421,8 @@ function vSetup() {
 }
 
 function renderNav() {
-  $('#tabs').innerHTML = S.user ? VIEWS.map(([k, n]) => `<a href="#${k}" ${S.view === k ? 'aria-current="page"' : ''}>${n}</a>`).join('') : '';
+  const cnt = {fila: ativosOrd().filter(p => !FECHADOS.includes(p.status)).length, compras: vivos('compras').filter(c => !c.comprado).length};
+  $('#tabs').innerHTML = S.user ? VIEWS.map(([k, n]) => `<a href="#${k}" ${S.view === k ? 'aria-current="page"' : ''}>${n}${cnt[k] ? `<span class="cnt">${cnt[k]}</span>` : ''}</a>`).join('') : '';
   $('#sair').hidden = !S.user;
   const s = $('#sync');
   if (!S.user) { s.textContent = ''; s.className = ''; return; }
