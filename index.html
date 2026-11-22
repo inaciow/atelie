@@ -84,7 +84,7 @@ main{max-width:1012px;margin:0 auto;padding:24px 16px 48px;display:flex;flex-dir
 .icon{border:1px solid var(--btn-bd);background:var(--btn);border-radius:6px;width:28px;height:28px;cursor:pointer;display:inline-grid;place-items:center;font-weight:600}
 .icon:hover{background:var(--btn-hover)}
 .icon:disabled{opacity:.4;cursor:default}
-.acoes{display:grid;grid-template-columns:repeat(4,1fr);gap:12px}
+.acoes{display:grid;grid-template-columns:repeat(5,1fr);gap:12px}
 .acao{background:var(--surface);border:1px solid var(--line);border-radius:6px;padding:12px 16px;cursor:pointer;text-align:left;display:flex;flex-direction:column;gap:2px;font-weight:600;font-size:14px;box-shadow:var(--shadow)}
 .acao span{font-weight:400;font-size:12px;color:var(--muted)}
 .acao:hover{border-color:var(--muted);background:var(--subtle)}
@@ -106,6 +106,14 @@ main{max-width:1012px;margin:0 auto;padding:24px 16px 48px;display:flex;flex-dir
 .chart .c-lab{fill:var(--muted);font-size:13px;font-family:var(--font)}
 .chart .c-val{fill:var(--ink);font-size:13px;font-weight:600;font-family:var(--font)}
 .chart .c-bar{fill:var(--accent-fg)}
+.hbars{display:grid;grid-template-columns:minmax(0,max-content) minmax(80px,1fr) auto;gap:10px 12px;align-items:center;font-size:14px}
+.hb{display:contents;cursor:pointer}
+.hb-n{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:22ch;color:var(--ink)}
+.hb-t{height:14px;background:var(--gray-soft);border-radius:7px;overflow:hidden}
+.hb-t i{display:block;height:100%;background:var(--accent-fg);border-radius:7px}
+.hb-v{font-variant-numeric:tabular-nums;font-weight:600;text-align:right;white-space:nowrap}
+.hb:hover .hb-n{text-decoration:underline}
+.hb-tot{margin:0}
 .pill{display:inline-block;border-radius:2em;padding:0 7px;font-size:12px;font-weight:500;line-height:18px;white-space:nowrap;border:1px solid transparent}
 .t-pronta{background:var(--accent-soft);color:var(--accent-fg);border-color:var(--accent-bd)}
 .t-simples{background:var(--blue-soft);color:var(--blue);border-color:var(--blue-bd)}
@@ -220,6 +228,7 @@ code{font-family:var(--mono);font-size:85%;background:var(--gray-soft);padding:2
 label.btn{display:inline-block}
 @media (max-width:640px){
   .acoes{grid-template-columns:1fr 1fr}
+  .acao.pri{grid-column:span 2}
   .fgrid{grid-template-columns:1fr}
   .grid2{grid-template-columns:1fr}
   main{padding-top:16px}

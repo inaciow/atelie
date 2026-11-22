@@ -49,14 +49,15 @@ const NORM = {
   pedidos: (id, d) => ({id, nome: str(d.nome) || '(sem nome)', cliente: str(d.cliente), tipo: TIPOS.includes(d.tipo) ? d.tipo : 'Custom simples',
     status: STATUS.includes(d.status) ? d.status : 'Na fila', prazo: str(d.prazo), horasEst: num(d.horasEst, 0), preco: num(d.preco),
     sinal: num(d.sinal, 0), pago: d.pago === true, contato: str(d.contato), pedidoEm: str(d.pedidoEm), entregueEm: str(d.entregueEm),
-    ordem: num(d.ordem, 1e6), lixo: d.lixo === true}),
+    ordem: num(d.ordem, 1e6), receitaId: str(d.receitaId), lixo: d.lixo === true}),
   horas: (id, d) => ({id, data: str(d.data), pedidoId: str(d.pedidoId), horas: num(d.horas, 0), inicio: str(d.inicio), fim: str(d.fim), lixo: d.lixo === true}),
   compras: (id, d) => ({id, item: str(d.item) || '(sem nome)', tipo: TIPOS_COMPRA.includes(d.tipo) ? d.tipo : 'Outro', cor: str(d.cor),
     qtd: num(d.qtd, 1), precoUn: num(d.precoUn, 0), onde: str(d.onde), pedidoId: str(d.pedidoId), comprado: d.comprado === true,
     compradoEm: str(d.compradoEm), criadoEm: str(d.criadoEm), lixo: d.lixo === true}),
   estoque: (id, d) => ({id, cor: str(d.cor) || '(sem nome)', situacao: SIT.includes(d.situacao) ? d.situacao : 'Tem', ordem: num(d.ordem, 1e6), hex: /^#[0-9a-f]{6}$/i.test(str(d.hex)) ? str(d.hex).toLowerCase() : '', lixo: d.lixo === true}),
   receitas: (id, d) => ({id, personagem: str(d.personagem) || '(sem nome)', fonte: FONTES.includes(d.fonte) ? d.fonte : 'Própria', autor: str(d.autor),
-    altura: num(d.altura), arquivo: str(d.arquivo), lixo: d.lixo === true})
+    altura: num(d.altura), arquivo: str(d.arquivo), tipoPadrao: TIPOS.includes(d.tipoPadrao) ? d.tipoPadrao : 'Receita pronta',
+    horasPadrao: num(d.horasPadrao), precoPadrao: num(d.precoPadrao), acompanhaId: str(d.acompanhaId), lixo: d.lixo === true})
 };
 
 const vivos = k => S[k].filter(x => !x.lixo);
@@ -76,8 +77,9 @@ function calcP(p) {
   const recebido = preco == null ? p.sinal : (p.pago ? preco : p.sinal);
   const aReceber = preco == null ? null : (p.pago ? 0 : Math.max(0, preco - p.sinal));
   const lucro = preco == null ? null : preco - c;
-  const rph = (lucro != null && f > 0) ? lucro / f : null;
-  return {f, fechado, c, restam, sug, recebido, aReceber, lucro, rph, dias: diasAte(p.prazo), pct: p.horasEst > 0 ? Math.min(1, f / p.horasEst) : 0};
+  const brinde = preco === 0;
+  const rph = (lucro != null && f > 0 && !brinde) ? lucro / f : null;
+  return {f, fechado, c, restam, sug, recebido, aReceber, lucro, rph, brinde, dias: diasAte(p.prazo), pct: p.horasEst > 0 ? Math.min(1, f / p.horasEst) : 0};
 }
 function kpis() {
   const todos = vivos('pedidos'), at = ativosOrd(), cf = C();
@@ -95,14 +97,16 @@ function kpis() {
   const saldo = recebido - gastos;
   const hs = vivos('horas');
   const seg = new Date(); seg.setDate(seg.getDate() - ((seg.getDay() + 6) % 7)); const segIso = isoDia(seg);
-  const ent = todos.filter(p => p.status === 'Entregue');
+  const ent = todos.filter(p => p.status === 'Entregue' && p.preco > 0);
   const hEnt = ent.reduce((a, p) => a + calc.get(p.id).f, 0), lEnt = ent.reduce((a, p) => a + (calc.get(p.id).lucro || 0), 0);
+  const brs = naoCanc.filter(p => calc.get(p.id).brinde);
   return {abertos: abertos.length, horasFila: at.reduce((a, p) => a + calc.get(p.id).restam, 0), proxima: abertos[0] ? abertos[0].nome : 'Nada na fila',
     prazo: prazos[0] ? fData(prazos[0]) : 'Nenhum marcado', atrasadas, fat, recebido, gastos, saldo, pend, lucro, aReceber,
     meta: cf.metaNatal, jaTenho: cf.metaNatal ? Math.min(1, Math.max(0, saldo) / cf.metaNatal) : null,
     seFila: cf.metaNatal ? Math.min(1, Math.max(0, saldo + aReceber) / cf.metaNatal) : null,
     hTotal: hs.reduce((a, h) => a + h.horas, 0), hSemana: hs.filter(h => h.data >= segIso).reduce((a, h) => a + h.horas, 0),
-    horaReal: hEnt > 0 ? lEnt / hEnt : null};
+    horaReal: hEnt > 0 ? lEnt / hEnt : null, vendidas: ent.length, hVendidas: hEnt,
+    brindes: brs.length, custoBrindes: brs.reduce((a, p) => a + calc.get(p.id).c, 0), hBrindes: brs.reduce((a, p) => a + calc.get(p.id).f, 0)};
 }
 
 const ref = (c, id) => doc(S.fs, 'users', S.user.uid, c, id);
@@ -154,6 +158,7 @@ function formPedido(id) {
     ${campo('contato', 'Contato', inp('contato', p?.contato, 'autocomplete="off"'))}
     ${campo('tipo', 'Tipo', sel('tipo', TIPOS, p?.tipo || 'Custom simples'))}
     ${campo('status', 'Status', sel('status', STATUS, p?.status || 'Na fila'))}
+    ${campo('receitaId', 'Receita', selReceita('receitaId', p?.receitaId, 'Nenhuma'), 'full')}
     ${campo('horasEst', 'Horas estimadas', numInp('horasEst', p?.horasEst || ''))}
     ${campo('prazo', 'Prazo', inp('prazo', p?.prazo, 'type="date"'))}
     <div class="sugbox full" id="sugbox"></div>
@@ -178,7 +183,7 @@ function formPedido(id) {
       if (!d.nome.trim()) { erroModal('Dá um nome pra peça.'); return false; }
       const patch = {nome: d.nome.trim(), cliente: d.cliente.trim(), contato: d.contato.trim(), tipo: d.tipo, status: d.status,
         horasEst: num(d.horasEst, 0), prazo: d.prazo, preco: num(d.preco), sinal: num(d.sinal, 0), pago: d.pago,
-        pedidoEm: d.pedidoEm, entregueEm: d.entregueEm || (d.status === 'Entregue' ? hoje() : '')};
+        pedidoEm: d.pedidoEm, entregueEm: d.entregueEm || (d.status === 'Entregue' ? hoje() : ''), receitaId: d.receitaId || ''};
       if (novo) { patch.ordem = ordemPara(d.prio); patch.lixo = false; criar('pedidos', patch, 'Pedido adicionado'); }
       else mudar('pedidos', p.id, patch, 'Pedido salvo');
     }});
@@ -189,6 +194,93 @@ function ordemPara(v) {
   const i = at.findIndex(p => p.id === v);
   if (i < 0) return at[at.length - 1].ordem + 1;
   return at[i + 1] ? (at[i].ordem + at[i + 1].ordem) / 2 : at[i].ordem + 1;
+}
+function ordensPara(v, k) {
+  const at = ativosOrd(); if (!at.length) return Array.from({length: k}, (_, j) => j + 1);
+  let a, b; const i = at.findIndex(p => p.id === v);
+  if (v === 'topo') { b = at[0].ordem; a = b - 1; }
+  else if (i < 0) { a = at[at.length - 1].ordem; b = a + k + 1; }
+  else { a = at[i].ordem; b = at[i + 1] ? at[i + 1].ordem : a + k + 1; }
+  const st = (b - a) / (k + 1); return Array.from({length: k}, (_, j) => a + st * (j + 1));
+}
+
+const escRe = v => v.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+const rec = id => id ? S.receitas.find(r => r.id === id && !r.lixo) : null;
+const recsOrd = () => vivos('receitas').sort((a, b) => a.personagem.localeCompare(b.personagem));
+const reNome = r => new RegExp('^' + escRe(semAcento(r.personagem)) + '\\s*(#)?\\s*(\\d+)$');
+const nomeNum = (r, n, hash) => r.personagem + (hash ? ' #' : ' ') + n;
+const daReceita = r => { const re = reNome(r); return vivos('pedidos').filter(p => p.receitaId === r.id || re.test(semAcento(p.nome))); };
+function proxNum(r) {
+  const re = reNome(r); let mx = 0, hash = false;
+  for (const p of vivos('pedidos')) { const m = re.exec(semAcento(p.nome)); if (m) { mx = Math.max(mx, +m[2]); if (m[1]) hash = true; } }
+  return {n: mx + 1, hash};
+}
+function statsReceita(r) {
+  const ps = daReceita(r), prontos = ps.filter(p => ['Pronto', 'Entregue'].includes(p.status) && feitas(p) > 0);
+  const media = prontos.length ? prontos.reduce((a, p) => a + feitas(p), 0) / prontos.length : null;
+  const comPreco = ps.filter(p => p.preco != null).sort((a, b) => (b.pedidoEm || '').localeCompare(a.pedidoEm || '') || b.ordem - a.ordem);
+  const ultEst = ps.filter(p => p.horasEst > 0).sort((a, b) => (b.pedidoEm || '').localeCompare(a.pedidoEm || ''))[0];
+  return {total: ps.length, prontos: prontos.length, media, ultPreco: comPreco[0] ? comPreco[0].preco : null,
+    horas: r.horasPadrao ?? (media != null ? Math.round(media * 10) / 10 : (ultEst ? ultEst.horasEst : null)),
+    preco: r.precoPadrao ?? (comPreco[0] ? comPreco[0].preco : null)};
+}
+function selReceita(id, v, vazio) {
+  return `<select id="${id}" name="${id}">${vazio ? `<option value="">${esc(vazio)}</option>` : ''}${recsOrd().map(r => `<option value="${esc(r.id)}"${r.id === v ? ' selected' : ''}>${esc(r.personagem)}</option>`).join('')}</select>`;
+}
+function planoReceita(r, q, junto) {
+  const {n, hash} = proxNum(r), ac = junto && r.acompanhaId ? rec(r.acompanhaId) : null;
+  const usados = new Set(vivos('pedidos').map(p => semAcento(p.nome)));
+  const acP = ac ? proxNum(ac) : null, out = [];
+  for (let j = 0; j < q; j++) {
+    out.push({r, nome: nomeNum(r, n + j, hash), principal: true});
+    if (ac) {
+      let nm = nomeNum(ac, n + j, acP.hash || hash);
+      if (usados.has(semAcento(nm))) { nm = nomeNum(ac, acP.n, acP.hash || hash); acP.n++; }
+      usados.add(semAcento(nm)); out.push({r: ac, nome: nm, principal: false});
+    }
+  }
+  return out;
+}
+function formDaReceita(rid) {
+  const rs = recsOrd();
+  if (!rs.length) { toast('Cria a receita primeiro (aba Receitas, + Receita).', true); location.hash = 'receitas'; return; }
+  const r0 = rec(rid) || rs[0], st0 = statsReceita(r0), at = ativosOrd();
+  const corpo = `<div class="fgrid">
+    ${campo('rec', 'Receita', selReceita('rec', r0.id), 'full')}
+    <div class="sugbox full" id="recprev"></div>
+    ${campo('qtd', 'Quantas', numInp('qtd', 1, 'min="1" max="50" step="1" inputmode="numeric"'))}
+    ${campo('tipo', 'Tipo', sel('tipo', TIPOS, r0.tipoPadrao))}
+    <label class="chk full" id="juntoBox"><input type="checkbox" name="junto" checked> <span id="juntoTxt"></span></label>
+    ${campo('cliente', 'Cliente', inp('cliente', '', 'autocomplete="off" placeholder="vazio = pronta entrega"'))}
+    ${campo('contato', 'Contato', inp('contato', '', 'autocomplete="off"'))}
+    ${campo('horasEst', 'Horas estimadas (cada)', numInp('horasEst', st0.horas ?? ''))}
+    ${campo('prazo', 'Prazo', inp('prazo', '', 'type="date"'))}
+    ${campo('preco', 'Preço (cada, R$)', numInp('preco', st0.preco ?? ''))}
+    ${campo('sinal', 'Sinal recebido (cada, R$)', numInp('sinal', ''))}
+    ${campo('prio', 'Posição na fila', `<select id="prio" name="prio"><option value="fim">No fim da fila</option><option value="topo">No topo (prioridade máxima)</option>${at.map(a => `<option value="${esc(a.id)}">Depois de: ${esc(a.nome)}</option>`).join('')}</select>`, 'full')}
+  </div>`;
+  let ultRec = r0.id;
+  abrirModal('Novo pedido de receita', corpo, {salvarTxt: 'Adicionar na fila',
+    onInput: f => {
+      const r = rec(f.rec.value); if (!r) return;
+      if (r.id !== ultRec) { ultRec = r.id; const st = statsReceita(r); f.horasEst.value = st.horas ?? ''; f.preco.value = st.preco ?? ''; f.tipo.value = r.tipoPadrao; f.junto.checked = true; }
+      const ac = r.acompanhaId ? rec(r.acompanhaId) : null;
+      $('#juntoBox').hidden = !ac; $('#juntoTxt').textContent = ac ? `Fazer junto: ${ac.personagem} (mesmo número, ${ac.precoPadrao != null ? fR(ac.precoPadrao) : 'preço a definir'})` : '';
+      const q = Math.max(1, Math.min(50, Math.round(num(f.qtd.value, 1)))), plano = planoReceita(r, q, f.junto.checked);
+      const st = statsReceita(r);
+      const info = st.prontos ? `média de ${fH(st.media)} nas ${st.prontos} ${plural(st.prontos, 'já feita', 'já feitas')}` : (st.total ? `${st.total} ${plural(st.total, 'pedido', 'pedidos')} dessa receita até agora` : 'primeira dessa receita');
+      $('#recprev').innerHTML = `Vai criar: <b>${plano.map(x => esc(x.nome)).join(', ')}</b><br><span class="muted small">${info}</span>`;
+    },
+    onOk: d => {
+      const r = rec(d.rec); if (!r) { erroModal('Escolhe a receita.'); return false; }
+      const q = Math.round(num(d.qtd, 1)); if (!(q >= 1 && q <= 50)) { erroModal('Quantidade entre 1 e 50.'); return false; }
+      const plano = planoReceita(r, q, d.junto && !!r.acompanhaId), ords = ordensPara(d.prio, plano.length), base = {cliente: d.cliente.trim(), contato: d.contato.trim(), prazo: d.prazo, status: 'Na fila', pago: false, pedidoEm: hoje(), entregueEm: '', lixo: false};
+      plano.forEach((x, j) => {
+        const st = x.principal ? null : statsReceita(x.r);
+        const it = x.principal ? {tipo: d.tipo, horasEst: num(d.horasEst, 0), preco: num(d.preco), sinal: num(d.sinal, 0)} : {tipo: x.r.tipoPadrao, horasEst: st.horas || 0, preco: st.preco, sinal: 0};
+        criar('pedidos', {...base, ...it, nome: x.nome, receitaId: x.r.id, ordem: ords[j]}, j === plano.length - 1 ? (plano.length === 1 ? `${x.nome} na fila` : `${plano.length} peças na fila`) : '');
+      });
+    }});
 }
 function formHoras(pid, hid) {
   const h = hid ? S.horas.find(x => x.id === hid) : null;
@@ -280,11 +372,17 @@ function formReceita(rid) {
   const r = rid ? S.receitas.find(x => x.id === rid) : null;
   const corpo = `<div class="fgrid">${campo('personagem', 'Personagem', inp('personagem', r?.personagem, 'required autocomplete="off"'), 'full')}
     ${campo('fonte', 'Fonte', sel('fonte', FONTES, r?.fonte || 'Própria'))}${campo('autor', 'Autor', inp('autor', r?.autor ?? 'Você'))}
-    ${campo('altura', 'Altura (cm)', numInp('altura', r?.altura))}${campo('arquivo', 'Arquivo ou link', inp('arquivo', r?.arquivo))}</div>`;
+    ${campo('altura', 'Altura (cm)', numInp('altura', r?.altura))}${campo('arquivo', 'Arquivo ou link', inp('arquivo', r?.arquivo))}
+    <p class="hint full">Pro botão <b>+ Da receita</b>: ele numera sozinho (Lula 1, Lula 2...) e preenche com o que estiver abaixo. Vazio = usa a média das peças já feitas.</p>
+    ${campo('tipoPadrao', 'Tipo', sel('tipoPadrao', TIPOS, r?.tipoPadrao || 'Receita pronta'))}
+    ${campo('horasPadrao', 'Horas por peça', numInp('horasPadrao', r?.horasPadrao, r ? `placeholder="${(() => { const st = statsReceita(r); return st.media != null ? 'média: ' + fN(st.media) : ''; })()}"` : ''))}
+    ${campo('precoPadrao', 'Preço (R$)', numInp('precoPadrao', r?.precoPadrao, 'placeholder="0 = brinde"'))}
+    ${campo('acompanhaId', 'Fazer junto (acessório)', `<select id="acompanhaId" name="acompanhaId"><option value="">Nada</option>${recsOrd().filter(x => !r || x.id !== r.id).map(x => `<option value="${esc(x.id)}"${r && x.id === r.acompanhaId ? ' selected' : ''}>${esc(x.personagem)}</option>`).join('')}</select>`)}</div>`;
   const extra = r ? `<button type="button" class="btn bad" data-a="excluir" data-col="receitas" data-id="${esc(r.id)}">Excluir</button>` : '';
   abrirModal(r ? 'Editar receita' : 'Nova receita', corpo, {extra, onOk: d => {
     if (!d.personagem.trim()) { erroModal('Diz o personagem.'); return false; }
-    const patch = {personagem: d.personagem.trim(), fonte: d.fonte, autor: d.autor.trim(), altura: num(d.altura), arquivo: d.arquivo.trim()};
+    const patch = {personagem: d.personagem.trim(), fonte: d.fonte, autor: d.autor.trim(), altura: num(d.altura), arquivo: d.arquivo.trim(),
+      tipoPadrao: d.tipoPadrao, horasPadrao: num(d.horasPadrao), precoPadrao: num(d.precoPadrao), acompanhaId: d.acompanhaId || ''};
     if (r) mudar('receitas', r.id, patch, 'Receita salva'); else { patch.lixo = false; criar('receitas', patch, 'Receita adicionada'); }
   }});
 }
@@ -373,28 +471,28 @@ function vTimer() {
 function kv(linhas) { return `<dl class="kv">${linhas.map(([k, v, c]) => `<dt>${k}</dt><dd class="${c || ''}">${v}</dd>`).join('')}</dl>`; }
 function barra(frac, rot) { return `<div class="meta-bar"><div class="head small"><span>${rot}</span><span class="sp"></span><b>${frac == null ? '–' : fP(frac)}</b></div><div class="bar"><i style="width:${Math.round((frac || 0) * 100)}%"></i></div></div>`; }
 function grafico() {
-  const rows = ativosOrd().map(p => ({n: p.nome, v: calcP(p).restam})).filter(r => r.v > 0).sort((a, b) => b.v - a.v);
+  const rows = ativosOrd().map(p => ({id: p.id, n: p.nome, v: calcP(p).restam})).filter(r => r.v > 0).sort((a, b) => b.v - a.v);
   if (!rows.length) return '<p class="muted">Nada pra fazer na fila.</p>';
-  const W = 560, rh = 34, lab = 180, top = 4, H = top + rows.length * rh + 4, max = Math.max(...rows.map(r => r.v)), bw = W - lab - 64;
-  let s = `<svg viewBox="0 0 ${W} ${H}" class="chart" role="img" aria-label="Horas que faltam por peça">`;
-  rows.forEach((r, i) => { const y = top + i * rh, w = Math.max(4, bw * r.v / max), nm = r.n.length > 24 ? r.n.slice(0, 23) + '…' : r.n;
-    s += `<text x="${lab - 10}" y="${y + 22}" text-anchor="end" class="c-lab">${esc(nm)}</text><rect x="${lab}" y="${y + 8}" width="${w}" height="20" rx="4" class="c-bar"/><text x="${lab + w + 8}" y="${y + 22}" class="c-val">${esc(fH(r.v))}</text>`; });
-  return s + '</svg>';
+  const max = Math.max(...rows.map(r => r.v)), tot = rows.reduce((a, r) => a + r.v, 0);
+  return `<div class="hbars">${rows.map(r => `<div class="hb" data-a="editPedido" data-id="${esc(r.id)}" title="${esc(r.n)}: faltam ${esc(fH(r.v))}"><span class="hb-n">${esc(r.n)}</span><span class="hb-t"><i style="width:${Math.max(3, Math.round(r.v / max * 100))}%"></i></span><b class="hb-v">${esc(fH(r.v))}</b></div>`).join('')}</div>
+    <p class="small muted hb-tot">${rows.length} ${plural(rows.length, 'peça', 'peças')} · ${fH(tot)} no total</p>`;
 }
 function vPainel() {
   const k = kpis();
   return `<section class="acoes" aria-label="Atalhos">
     <button class="acao pri" data-a="nav" data-v="timer">Timer<span>${rodando() ? 'rodando em ' + esc(nomePed(S.timer.pedidoId)) : 'escolhe a peça e aperta'}</span></button>
     <button class="acao" data-a="novoPedido">+ Pedido<span>entra na fila</span></button>
+    <button class="acao" data-a="pedidoReceita">+ Da receita<span>numera sozinho</span></button>
     <button class="acao" data-a="novaCompra">+ Compra<span>ou gasto</span></button>
     <button class="acao" data-a="nav" data-v="estoque">Estoque<span>${vivos('estoque').filter(e => ['Pouco', 'Acabou'].includes(e.situacao)).length} cores acabando</span></button>
   </section>
   <div class="grid2">
     <section class="card"><h2>Fila</h2>${kv([['Pedidos em aberto', k.abertos], ['Horas de trabalho na fila', fH(k.horasFila)], ['Próxima peça', esc(k.proxima)], ['Prazo mais perto', k.prazo], ['Peças atrasadas', k.atrasadas, k.atrasadas > 0 ? 'bad' : '']])}</section>
     <section class="card"><h2>Horas que faltam por peça</h2>${grafico()}</section>
-    <section class="card"><h2>Dinheiro</h2>${kv([['Faturamento previsto', fR(k.fat)], ['Já recebido', fR(k.recebido)], ['Gastos (compras feitas)', fR(k.gastos)], ['Saldo em caixa', fR(k.saldo), k.saldo < 0 ? 'bad' : 'good'], ['Compras pendentes', fR(k.pend)], ['Lucro previsto', fR(k.lucro)]])}</section>
+    <section class="card"><h2>Dinheiro</h2>${kv([['Faturamento previsto', fR(k.fat)], ['Já recebido', fR(k.recebido)], ['Gastos (compras feitas)', fR(k.gastos)], ['Saldo em caixa', fR(k.saldo), k.saldo < 0 ? 'bad' : 'good'], ['Compras pendentes', fR(k.pend)], ['Lucro previsto', fR(k.lucro)], ...(k.brindes ? [[`Brindes (${k.brindes} ${plural(k.brindes, 'peça', 'peças')}, custo)`, fR(-k.custoBrindes), 'bad']] : [])])}</section>
     <section class="card"><h2>Natal</h2>${kv([['Meta', k.meta ? fR(k.meta) : 'coloca na Config'], ['Já tenho', fR(Math.max(0, k.saldo))], ['Se a fila toda pagar', fR(Math.max(0, k.saldo + k.aReceber)), 'good']])}${k.meta ? `${barra(k.jaTenho, 'Já tenho')}${barra(k.seFila, 'Se a fila toda pagar')}` : ''}</section>
-    <section class="card"><h2>Horas</h2>${kv([['Trabalhadas no total', fH(k.hTotal)], ['Nesta semana', fH(k.hSemana)], ['Sua hora real (peças entregues)', k.horaReal == null ? 'sem entregas ainda' : fR(k.horaReal) + '/h', k.horaReal != null && k.horaReal < 10 ? 'bad' : '']])}</section>
+    <section class="card"><h2>Horas</h2>${kv([['Trabalhadas no total', fH(k.hTotal)], ['Nesta semana', fH(k.hSemana)], ['Sua hora real (peças vendidas e entregues)', k.horaReal == null ? 'sem vendas entregues ainda' : fR(k.horaReal) + '/h', k.horaReal != null && k.horaReal < 10 ? 'bad' : ''], ...(k.vendidas ? [['Base do cálculo', `${k.vendidas} ${plural(k.vendidas, 'peça', 'peças')} · ${fH(k.hVendidas)}`]] : []), ...(k.brindes ? [['Horas em brindes (fora da conta)', fH(k.hBrindes)]] : [])])}
+      ${k.vendidas && k.hVendidas < 3 ? '<p class="hint">Com poucas horas vendidas, esse número ainda pula bastante.</p>' : ''}</section>
   </div>`;
 }
 function cardPedido(p, pos, primeiro, ultimo) {
@@ -406,7 +504,7 @@ function cardPedido(p, pos, primeiro, ultimo) {
   return `<article class="ped" data-s="${esc(p.status)}">
     <div class="ped-top">${pos ? `<span class="pos">${pos}º</span>` : ''}<h3 data-a="editPedido" data-id="${esc(p.id)}" tabindex="0">${esc(p.nome)}</h3>
       <select class="status ${ST_CLS[p.status]}" data-c="status" data-id="${esc(p.id)}" aria-label="Status de ${esc(p.nome)}">${opts(STATUS, p.status)}</select></div>
-    <div class="ped-meta"><span class="pill ${TIPO_CLS[p.tipo]}">${esc(p.tipo)}</span>${p.cliente ? `<span>${esc(p.cliente)}</span>` : ''}${p.contato ? `<span>${esc(p.contato)}</span>` : ''}${prazo}</div>
+    <div class="ped-meta"><span class="pill ${TIPO_CLS[p.tipo]}">${esc(p.tipo)}</span>${p.preco === 0 ? '<span class="pill t-acessorio">Brinde</span>' : ''}${p.cliente ? `<span>${esc(p.cliente)}</span>` : ''}${p.contato ? `<span>${esc(p.contato)}</span>` : ''}${prazo}</div>
     <div class="prog"><div class="bar"><i style="width:${Math.round(c.pct * 100)}%"></i></div><span class="num">${fH(c.f)} de ${fH(p.horasEst)}${c.restam > 0 ? ' · faltam ' + fH(c.restam) : ''}</span></div>
     <div class="nums">
       <div><small>Preço</small><b>${p.preco == null ? 'a definir' : fR(p.preco)}</b></div>
@@ -414,7 +512,7 @@ function cardPedido(p, pos, primeiro, ultimo) {
       <div><small>Sinal</small><b>${fR(p.sinal)}</b></div>
       <div><small>A receber</small><b>${fR(c.aReceber)}</b></div>
       <div class="${c.lucro != null && c.lucro < 0 ? 'bad' : ''}"><small>Lucro</small><b>${fR(c.lucro)}</b></div>
-      <div class="${c.rph != null && c.rph < 10 ? 'bad' : ''}"><small>Sua hora</small><b>${c.rph == null ? '–' : fR(c.rph) + '/h'}</b></div>
+      <div class="${c.rph != null && c.rph < 10 ? 'bad' : ''}"><small>Sua hora</small><b>${c.brinde ? 'brinde' : c.rph == null ? '–' : fR(c.rph) + '/h'}</b></div>
     </div>
     <div class="ped-acts">
       <label class="chk"><input type="checkbox" data-c="pago" data-id="${esc(p.id)}" ${p.pago ? 'checked' : ''}> Pago</label>
@@ -426,7 +524,7 @@ function cardPedido(p, pos, primeiro, ultimo) {
 }
 function vFila() {
   const at = ativosOrd(), saiu = vivos('pedidos').filter(p => SAIU.includes(p.status)).sort((a, b) => (b.entregueEm || '').localeCompare(a.entregueEm || ''));
-  return `<div class="head"><h2>Fila (${at.length})</h2><span class="sp"></span><button class="btn pri" data-a="novoPedido">+ Pedido</button></div>
+  return `<div class="head"><h2>Fila (${at.length})</h2><span class="sp"></span><button class="btn" data-a="pedidoReceita">+ Da receita</button><button class="btn pri" data-a="novoPedido">+ Pedido</button></div>
   <div class="lista">${at.length ? at.map((p, i) => cardPedido(p, i + 1, i === 0, i === at.length - 1)).join('') : '<div class="empty">Fila vazia. Toque em + Pedido.</div>'}</div>
   ${saiu.length ? `<details ${S.verSaiu ? 'open' : ''} data-t="verSaiu"><summary>Entregues e cancelados (${saiu.length})</summary><div class="lista" style="margin-top:10px">${saiu.map(p => cardPedido(p, 0)).join('')}</div></details>` : ''}`;
 }
@@ -489,8 +587,11 @@ function vReceitas() {
   const rs = vivos('receitas').sort((a, b) => a.personagem.localeCompare(b.personagem));
   const cls = {'Própria': 't-pronta', 'A criar': 'st-fio', 'Comprada': 't-medio', 'Grátis': 't-simples'};
   return `<div class="head"><h2>Receitas</h2><span class="sp"></span><button class="btn pri" data-a="novaReceita">+ Receita</button></div>
-  <div class="card">${rs.length ? rs.map(r => `<div class="row"><span class="grow"><b>${esc(r.personagem)}</b><br><span class="small muted">${esc(r.autor)}${r.altura ? ' · ' + fN(r.altura) + ' cm' : ''}${r.arquivo ? ' · ' + esc(r.arquivo) : ''}</span></span>
-    <span class="pill ${cls[r.fonte]}">${esc(r.fonte)}</span><button class="btn sm" data-a="editReceita" data-id="${esc(r.id)}">Editar</button></div>`).join('') : '<div class="empty">Nenhuma receita ainda.</div>'}</div>`;
+  <div class="card">${rs.length ? rs.map(r => { const st = statsReceita(r), ac = rec(r.acompanhaId), px = proxNum(r);
+    const linha2 = [esc(r.autor), r.altura ? fN(r.altura) + ' cm' : '', r.arquivo ? esc(r.arquivo) : ''].filter(Boolean).join(' · ');
+    const linha3 = [st.total ? `${st.total} ${plural(st.total, 'pedido', 'pedidos')}` : 'nenhum pedido ainda', st.media != null ? 'média ' + fH(st.media) : '', st.preco != null ? (st.preco === 0 ? 'brinde' : fR(st.preco)) : '', ac ? 'junto: ' + esc(ac.personagem) : '', 'próximo: ' + esc(nomeNum(r, px.n, px.hash))].filter(Boolean).join(' · ');
+    return `<div class="row"><span class="grow"><b>${esc(r.personagem)}</b><br><span class="small muted">${linha2}${linha2 ? '<br>' : ''}${linha3}</span></span>
+    <span class="pill ${cls[r.fonte]}">${esc(r.fonte)}</span><button class="btn sm" data-a="editReceita" data-id="${esc(r.id)}">Editar</button><button class="btn sm pri" data-a="pedidoReceita" data-id="${esc(r.id)}">+ Pedido</button></div>`; }).join('') : '<div class="empty">Nenhuma receita ainda.</div>'}</div>`;
 }
 function vConfig() {
   const cf = C(), lixo = COLS.flatMap(c => S[c].filter(x => x.lixo).map(x => ({c, x})));
@@ -578,7 +679,7 @@ document.addEventListener('click', e => {
     nav: () => { location.hash = b.dataset.v; },
     novoPedido: () => formPedido(), editPedido: () => formPedido(id), lancarHoras: () => formHoras(id), editHoras: () => formHoras(null, id),
     novaCompra: () => formCompra(), editCompra: () => formCompra(id), novaCor: () => formCor(), editCor: () => formCor(id),
-    novaReceita: () => formReceita(), editReceita: () => formReceita(id),
+    novaReceita: () => formReceita(), editReceita: () => formReceita(id), pedidoReceita: () => formDaReceita(id),
     tmPausa: () => timerPausa(), tmEscolher: () => { S.tp = id; render(); }, tmTrocar: () => { S.tp = 'escolher'; render(); },
     tmToggle: () => { if (rodando() && S.timer.pedidoId === id) timerPausa(); else timerStart(id); },
     tmTerminei: () => terminei(id), tmAbrir: () => { S.tp = id; if (location.hash === '#timer') render(); else location.hash = 'timer'; },
@@ -672,12 +773,12 @@ function planilha() {
   if (!window.XLSX) { toast('A biblioteca da planilha não carregou. Abre o app uma vez com internet.', true); return; }
   const X = window.XLSX, wb = X.utils.book_new(), add = (n, rows) => X.utils.book_append_sheet(wb, X.utils.aoa_to_sheet(rows), n);
   const at = ativosOrd(), todos = [...at, ...vivos('pedidos').filter(p => SAIU.includes(p.status))];
-  add('Fila', [['Ordem', 'Peça', 'Cliente', 'Tipo', 'Status', 'Prazo', 'Horas est.', 'Horas feitas', 'Restam (h)', 'Sugerido', 'Preço', 'Sinal', 'Pago', 'A receber', 'Lucro', 'R$/h real', 'Contato', 'Pedido em', 'Entregue em'],
-    ...todos.map(p => { const c = calcP(p), i = at.indexOf(p); return [i >= 0 ? i + 1 : '', p.nome, p.cliente, p.tipo, p.status, p.prazo, p.horasEst, c.f, c.restam, c.sug, p.preco, p.sinal, p.pago ? 'Sim' : 'Não', c.aReceber, c.lucro, c.rph == null ? '' : Math.round(c.rph * 100) / 100, p.contato, p.pedidoEm, p.entregueEm]; })]);
+  add('Fila', [['Ordem', 'Peça', 'Cliente', 'Tipo', 'Status', 'Prazo', 'Horas est.', 'Horas feitas', 'Restam (h)', 'Sugerido', 'Preço', 'Sinal', 'Pago', 'A receber', 'Lucro', 'R$/h real', 'Contato', 'Pedido em', 'Entregue em', 'Receita'],
+    ...todos.map(p => { const c = calcP(p), i = at.indexOf(p); return [i >= 0 ? i + 1 : '', p.nome, p.cliente, p.tipo, p.status, p.prazo, p.horasEst, c.f, c.restam, c.sug, p.preco, p.sinal, p.pago ? 'Sim' : 'Não', c.aReceber, c.lucro, c.rph == null ? '' : Math.round(c.rph * 100) / 100, p.contato, p.pedidoEm, p.entregueEm, rec(p.receitaId)?.personagem || '']; })]);
   add('Horas', [['Data', 'Peça', 'Horas', 'Início', 'Fim'], ...vivos('horas').sort((a, b) => a.data.localeCompare(b.data)).map(h => [h.data, nomePed(h.pedidoId), h.horas, h.inicio, h.fim])]);
   add('Compras', [['Item', 'Tipo', 'Cor', 'Qtd', 'Preço un.', 'Total', 'Pra', 'Onde', 'Comprado'], ...vivos('compras').map(c => [c.item, c.tipo, c.cor, c.qtd, c.precoUn, c.qtd * c.precoUn, nomePed(c.pedidoId), c.onde, c.comprado ? 'Sim' : 'Não'])]);
   add('Estoque', [['Cor', 'Situação'], ...vivos('estoque').map(e => [e.cor, e.situacao])]);
-  add('Receitas', [['Personagem', 'Fonte', 'Autor', 'Altura (cm)', 'Arquivo'], ...vivos('receitas').map(r => [r.personagem, r.fonte, r.autor, r.altura, r.arquivo])]);
+  add('Receitas', [['Personagem', 'Fonte', 'Autor', 'Altura (cm)', 'Arquivo', 'Tipo', 'Horas por peça', 'Preço', 'Faz junto', 'Feitos', 'Média de horas'], ...vivos('receitas').map(r => { const st = statsReceita(r); return [r.personagem, r.fonte, r.autor, r.altura, r.arquivo, r.tipoPadrao, r.horasPadrao, r.precoPadrao, rec(r.acompanhaId)?.personagem || '', st.total, st.media == null ? '' : Math.round(st.media * 100) / 100]; })]);
   const cf = C(); add('Config', [['Parâmetro', 'Valor'], ['Valor da hora', cf.valorHora], ['Preço do novelo', cf.precoNovelo], ['Miudezas por boneco', cf.miudezas], ['Desconto família', cf.descontoFamilia], ['Meta do Natal', cf.metaNatal]]);
   baixar(`atelie-${hoje()}.xlsx`, X.write(wb, {type: 'array', bookType: 'xlsx'}), 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
 }
