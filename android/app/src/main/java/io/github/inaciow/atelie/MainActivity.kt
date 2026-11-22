@@ -17,6 +17,7 @@ import android.os.Build
 import android.os.Bundle
 import android.provider.MediaStore
 import android.util.Base64
+import android.view.KeyEvent
 import android.view.View
 import android.view.WindowManager
 import android.webkit.JavascriptInterface
@@ -87,6 +88,7 @@ class MainActivity : ComponentActivity() {
     private var foto: Pair<File, Uri>? = null
     private var timer: Pair<String, Long>? = null
     private var pediuNotificacao = false
+    private var volume = false
 
     private val escolherArquivo =
         registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { r ->
@@ -174,8 +176,11 @@ class MainActivity : ComponentActivity() {
                 aoEscolher?.onReceiveValue(null)
                 aoEscolher = cb
                 foto = null
-                var intent = p.createIntent()
-                if (p.acceptTypes.any { it.startsWith("image") }) {
+                // A WebView monta o seletor só com o primeiro tipo do accept (ex.: ".md"), que às vezes
+                // não abre nada. Fora as fotos, mostra todos os arquivos e o site confere a extensão.
+                var intent = if (p.acceptTypes.all { it.startsWith("image") }) p.createIntent()
+                else Intent(Intent.ACTION_GET_CONTENT).addCategory(Intent.CATEGORY_OPENABLE).setType("*/*")
+                if (p.acceptTypes.all { it.startsWith("image") }) {
                     // "Tirar foto": oferece a câmera junto com a galeria.
                     val pasta = File(cacheDir, "fotos").apply { mkdirs(); listFiles()?.forEach { it.delete() } }
                     val arq = File(pasta, "foto-${System.currentTimeMillis()}.jpg")
@@ -265,7 +270,20 @@ class MainActivity : ComponentActivity() {
                 timer = if (nome.isEmpty()) null else nome to m.optLong("base")
                 mostrarTimer()
             }
+            "volume" -> volume = m.optBoolean("on")
         }
+    }
+
+    /** Com uma receita aberta, os botões de volume passam as rodadas (+ avança, − volta). */
+    override fun dispatchKeyEvent(e: KeyEvent): Boolean {
+        val tecla = e.keyCode
+        if (volume && (tecla == KeyEvent.KEYCODE_VOLUME_UP || tecla == KeyEvent.KEYCODE_VOLUME_DOWN)) {
+            if (e.action == KeyEvent.ACTION_DOWN && e.repeatCount == 0) {
+                enviar(JSONObject().put("t", "volume").put("k", if (tecla == KeyEvent.KEYCODE_VOLUME_UP) "mais" else "menos"))
+            }
+            return true
+        }
+        return super.dispatchKeyEvent(e)
     }
 
     private fun enviar(m: JSONObject) =

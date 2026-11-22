@@ -9,9 +9,19 @@ const andMsg = (t, d) => { try { AND.postMessage(JSON.stringify({t, ...d})); } c
 window.atelieDoAndroid = m => {
   if (m.t === 'token') signInWithCredential(S.auth, GoogleAuthProvider.credential(m.idToken)).catch(e => toast('Não deu pra entrar: ' + (e.code || e.message), true));
   else if (m.t === 'erro') toast(m.msg, true);
+  else if (m.t === 'volume') segPasso(m.k === 'mais' ? 1 : -1);
 };
+window.atelieAtualizou = () => { S.novaVersao = true; tentaRecarregar(); };
+function tentaRecarregar() {
+  if (!S.novaVersao) return;
+  const ae = document.activeElement;
+  if (!$('#modal').hidden || (ae && /INPUT|TEXTAREA|SELECT/.test(ae.tagName))) return;
+  try { sessionStorage.setItem('atelie-atualizou', '1'); } catch {}
+  location.reload();
+}
 window.atelieVoltar = () => { if (!$('#modal').hidden) { fecharModal(); return true; } return false; };
-let andTm = null;
+let andTm = null, andVol = null;
+function andVolume(on) { if (!AND || on === andVol) return; andVol = on; andMsg('volume', {on}); }
 function andTimer() {
   if (!AND) return;
   const p = S.user && rodando() ? ped(S.timer.pedidoId) : null;
@@ -30,12 +40,13 @@ const SIT = ['Cheio','Tem','Pouco','Acabou','Não tenho'];
 const TIPOS_COMPRA = ['Novelo','Linha de bordado','Olhinhos','Fibra','Botão','Strass/miçanga','Receita (PDF)','Outro'];
 const FONTES = ['Própria','A criar','Comprada','Grátis'];
 const COLS = ['pedidos','horas','compras','estoque','receitas'];
-const DEF_CFG = {valorHora:13, precoNovelo:20, miudezas:8, descontoFamilia:0.1, metaNatal:null};
+const DEF_CFG = {valorHora:13, precoNovelo:20, miudezas:8, descontoFamilia:0.1, metaNatal:null,
+  indiretos:10, extraSimples:10, extraMedio:20, extraComplexo:35, embalagem:0, taxaPag:0, urgencia:0, urgDias:7, corrigeHoras:true};
 const VIEWS = [['timer','Timer'],['painel','Painel'],['fila','Fila'],['horas','Horas'],['compras','Compras'],['estoque','Estoque'],['calculadora','Calculadora'],['receitas','Receitas'],['config','Config']];
 
 const S = {pedidos:[],horas:[],compras:[],estoque:[],receitas:[],raw:{},config:{...DEF_CFG},rawCfg:null,timer:null,
   ok:{},pend:{},user:null,tp:null,inst:null,fs:null,setup:false,view:'painel',verSaiu:false,verComprados:false,adiado:false,
-  calc:{horas:10,novelos:0,outros:0}};
+  calc:{horas:10,novelos:0,outros:0,tipo:'Custom simples',rid:'',prazo:''}};
 
 const $ = s => document.querySelector(s);
 const esc = v => String(v ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -66,7 +77,7 @@ const NORM = {
   pedidos: (id, d) => ({id, nome: str(d.nome) || '(sem nome)', cliente: str(d.cliente), tipo: TIPOS.includes(d.tipo) ? d.tipo : 'Custom simples',
     status: STATUS.includes(d.status) ? d.status : 'Na fila', prazo: str(d.prazo), horasEst: num(d.horasEst, 0), preco: num(d.preco),
     sinal: num(d.sinal, 0), pago: d.pago === true, contato: str(d.contato), pedidoEm: str(d.pedidoEm), entregueEm: str(d.entregueEm),
-    ordem: num(d.ordem, 1e6), receitaId: str(d.receitaId), lixo: d.lixo === true}),
+    ordem: num(d.ordem, 1e6), receitaId: str(d.receitaId), passo: num(d.passo, 0), lixo: d.lixo === true}),
   horas: (id, d) => ({id, data: str(d.data), pedidoId: str(d.pedidoId), horas: num(d.horas, 0), inicio: str(d.inicio), fim: str(d.fim), lixo: d.lixo === true}),
   compras: (id, d) => ({id, item: str(d.item) || '(sem nome)', tipo: TIPOS_COMPRA.includes(d.tipo) ? d.tipo : 'Outro', cor: str(d.cor),
     qtd: num(d.qtd, 1), precoUn: num(d.precoUn, 0), onde: str(d.onde), pedidoId: str(d.pedidoId), comprado: d.comprado === true,
@@ -74,14 +85,17 @@ const NORM = {
   estoque: (id, d) => ({id, cor: str(d.cor) || '(sem nome)', situacao: SIT.includes(d.situacao) ? d.situacao : 'Tem', ordem: num(d.ordem, 1e6), hex: /^#[0-9a-f]{6}$/i.test(str(d.hex)) ? str(d.hex).toLowerCase() : '', lixo: d.lixo === true}),
   receitas: (id, d) => ({id, personagem: str(d.personagem) || '(sem nome)', fonte: FONTES.includes(d.fonte) ? d.fonte : 'Própria', autor: str(d.autor),
     altura: num(d.altura), arquivo: str(d.arquivo), tipoPadrao: TIPOS.includes(d.tipoPadrao) ? d.tipoPadrao : 'Receita pronta',
-    horasPadrao: num(d.horasPadrao), precoPadrao: num(d.precoPadrao), acompanhaId: str(d.acompanhaId), lixo: d.lixo === true})
+    horasPadrao: num(d.horasPadrao), precoPadrao: num(d.precoPadrao), acompanhaId: str(d.acompanhaId), texto: str(d.texto), passo: num(d.passo, 0), lixo: d.lixo === true})
 };
 
 const vivos = k => S[k].filter(x => !x.lixo);
 const ped = id => S.pedidos.find(p => p.id === id);
 const nomePed = id => id ? (ped(id)?.nome || '(pedido apagado)') : 'Estoque';
 const C = () => ({valorHora: num(S.config.valorHora, 13), precoNovelo: num(S.config.precoNovelo, 20), miudezas: num(S.config.miudezas, 8),
-  descontoFamilia: num(S.config.descontoFamilia, 0.1), metaNatal: num(S.config.metaNatal)});
+  descontoFamilia: num(S.config.descontoFamilia, 0.1), metaNatal: num(S.config.metaNatal),
+  indiretos: num(S.config.indiretos, 10), extraSimples: num(S.config.extraSimples, 10), extraMedio: num(S.config.extraMedio, 20),
+  extraComplexo: num(S.config.extraComplexo, 35), embalagem: num(S.config.embalagem, 0), taxaPag: num(S.config.taxaPag, 0),
+  urgencia: num(S.config.urgencia, 0), urgDias: num(S.config.urgDias, 7), corrigeHoras: S.config.corrigeHoras !== false});
 const ativosOrd = () => vivos('pedidos').filter(p => !SAIU.includes(p.status)).sort((a, b) => a.ordem - b.ordem || a.nome.localeCompare(b.nome));
 const feitas = p => vivos('horas').filter(h => h.pedidoId === p.id).reduce((a, h) => a + h.horas, 0);
 const comprasDe = p => vivos('compras').filter(c => c.pedidoId === p.id).reduce((a, c) => a + c.qtd * c.precoUn, 0);
@@ -89,7 +103,7 @@ const custo = p => comprasDe(p) + (p.tipo === 'Acessório' ? 0 : C().miudezas);
 function calcP(p) {
   const f = feitas(p), fechado = FECHADOS.includes(p.status), c = custo(p);
   const restam = fechado ? 0 : Math.max(0, p.horasEst - f);
-  const sug = p.horasEst > 0 ? r90(p.horasEst * C().valorHora + c) : null;
+  const sug = sugerePreco({horas: p.horasEst, tipo: p.tipo, material: comprasDe(p), prazo: p.prazo, desde: p.pedidoEm, rid: p.receitaId, pid: p.id, feitasJa: f})?.sug ?? null;
   const preco = p.preco;
   const recebido = preco == null ? p.sinal : (p.pago ? preco : p.sinal);
   const aReceber = preco == null ? null : (p.pago ? 0 : Math.max(0, preco - p.sinal));
@@ -98,6 +112,79 @@ function calcP(p) {
   const rph = (lucro != null && f > 0 && !brinde) ? lucro / f : null;
   return {f, fechado, c, restam, sug, recebido, aReceber, lucro, rph, brinde, dias: diasAte(p.prazo), pct: p.horasEst > 0 ? Math.min(1, f / p.horasEst) : 0};
 }
+// Preço sugerido: trabalho (horas corrigidas pelo histórico) + criação (custom) + material + miudezas
+// + custos indiretos + urgência + embalagem + taxa de pagamento. Família: desconto só no trabalho.
+const EXTRA_TIPO = {'Custom simples': 'extraSimples', 'Custom médio': 'extraMedio', 'Custom complexo': 'extraComplexo'};
+let fhMemo;
+function fatorHoras() {
+  if (fhMemo !== undefined) return fhMemo;
+  const rs = vivos('pedidos').filter(p => ['Pronto', 'Entregue'].includes(p.status) && p.horasEst > 0)
+    .map(p => feitas(p) / p.horasEst).filter(r => r > 0.2 && r < 5).sort((a, b) => a - b);
+  if (rs.length < 3) return (fhMemo = null);
+  const k = rs.length >> 1, m = rs.length % 2 ? rs[k] : (rs[k - 1] + rs[k]) / 2;
+  return (fhMemo = {f: Math.min(2, Math.max(0.6, m)), n: rs.length});
+}
+function matReceita(rid, sem) {
+  const r = rec(rid); if (!r) return null;
+  const ps = daReceita(r).filter(p => p.id !== sem && comprasDe(p) > 0);
+  return ps.length ? {v: ps.reduce((a, p) => a + comprasDe(p), 0) / ps.length, n: ps.length} : null;
+}
+function sugerePreco({horas, tipo, material = 0, extraMat = 0, prazo = '', desde = '', rid = '', pid = '', feitasJa = 0}) {
+  const cf = C();
+  if (!(horas > 0) && !(feitasJa > 0)) return null;
+  let h = horas > 0 ? horas : 0, hNota = '';
+  // Receita com peças prontas: as horas já vêm de dado real (média), então não corrige de novo.
+  const rr = rec(rid), comMedia = rr ? statsReceita(rr).prontos > 0 : false;
+  const fh = cf.corrigeHoras && h > 0 && !comMedia ? fatorHoras() : null;
+  if (fh && Math.abs(fh.f - 1) >= 0.05) {
+    h *= fh.f;
+    const pc = Math.round(Math.abs(fh.f - 1) * 100);
+    hNota = `estimei ${fH(horas)}: suas peças costumam levar ${pc}% ${fh.f > 1 ? 'a mais' : 'a menos'} que o estimado (${fh.n} peças)`;
+  }
+  if (feitasJa > h) { h = feitasJa; hNota = `já foram ${fH(feitasJa)} de trabalho`; }
+  const mao = h * cf.valorHora;
+  const pExtra = tipo === 'Acessório' ? 0 : (cf[EXTRA_TIPO[tipo]] || 0), extra = mao * pExtra / 100;
+  let mat = 0, matNota = '';
+  if (material > 0) { mat = material; matNota = 'compras ligadas à peça'; }
+  else if (extraMat > 0) { mat = extraMat; matNota = 'novelos e outros gastos'; }
+  else { const mr = rid ? matReceita(rid, pid) : null; if (mr) { mat = mr.v; matNota = `média de ${mr.n} ${plural(mr.n, 'peça', 'peças')} dessa receita`; } }
+  const miud = tipo === 'Acessório' ? 0 : cf.miudezas;
+  const ind = (mao + extra + mat + miud) * cf.indiretos / 100;
+  const ref = desde && prazo ? Math.round((dia(prazo) - dia(desde)) / 864e5) : (prazo ? diasAte(prazo) : null);
+  const urg = cf.urgencia > 0 && ref != null && ref >= 0 && ref <= cf.urgDias ? (mao + extra) * cf.urgencia / 100 : 0;
+  const emb = cf.embalagem, tx = cf.taxaPag > 0 && cf.taxaPag < 50 ? cf.taxaPag / 100 : 0;
+  const liq = mao + extra + mat + miud + ind + urg + emb, total = liq / (1 - tx), taxa = total - liq;
+  const custos = mat + miud + ind + emb, sug = r90(total);
+  const fam = r90((custos + (mao + extra) * (1 - cf.descontoFamilia) + urg) / (1 - tx));
+  const horaEm = v => h > 0 ? (v * (1 - tx) - custos) / h : null;
+  const linhas = [['Trabalho', `${fH(h)} × ${fR(cf.valorHora)}/h`, mao, hNota]];
+  if (extra) linhas.push(['Criação da receita', `+${fN(pExtra)}% no trabalho (${tipo})`, extra]);
+  linhas.push(['Material', matNota || 'sem compras ligadas ainda', mat]);
+  if (miud) linhas.push(['Miudezas', 'olhinhos, fibra, botões', miud]);
+  if (ind) linhas.push(['Custos indiretos', `${fN(cf.indiretos)}%: luz, agulhas, desgaste`, ind]);
+  if (urg) linhas.push(['Urgência', `+${fN(cf.urgencia)}% no trabalho (prazo de ${ref} ${plural(ref, 'dia', 'dias')})`, urg]);
+  if (emb) linhas.push(['Embalagem', '', emb]);
+  if (taxa) linhas.push(['Taxa de pagamento', `${fN(cf.taxaPag)}%`, taxa]);
+  const refs = [];
+  const r = rec(rid);
+  if (r) {
+    const cont = {};
+    daReceita(r).filter(p => p.id !== pid && p.preco > 0).forEach(p => { cont[p.preco] = (cont[p.preco] || 0) + 1; });
+    const vs = Object.entries(cont).sort((a, b) => b[1] - a[1]).slice(0, 3);
+    if (vs.length) refs.push(`Já cobrou por ${esc(r.personagem)}: ${vs.map(([v, n]) => fR(+v) + (n > 1 ? ` (${n}×)` : '')).join(', ')}`);
+  }
+  return {h, mao, extra, mat, miud, ind, urg, emb, taxa, total, sug, fam, linhas, refs, horaSug: horaEm(sug), horaFam: horaEm(fam)};
+}
+function precoHtml(pr, aberto, semTopo) {
+  if (!pr) return '<span class="muted">Põe as horas estimadas pra ver o preço sugerido.</span>';
+  const tab = `<table class="pz-t">${pr.linhas.map(([a, b, v, n]) => `<tr><td>${a}${b ? ` <span class="muted">· ${b}</span>` : ''}${n ? `<div class="muted small">${n}</div>` : ''}</td><td class="num">${fR(v)}</td></tr>`).join('')}
+    <tr class="pz-soma"><td>Soma <span class="muted">(arredondada pra ,90)</span></td><td class="num">${fR(pr.total)}</td></tr></table>`;
+  return `${semTopo ? '' : `<div class="pz-top"><span>Sugestão <b class="pz-v">${fR(pr.sug)}</b></span><span>família <b>${fR(pr.fam)}</b></span>
+    <span class="muted small">sua hora fica ${fR(pr.horaSug)}/h</span></div>`}
+    <details ${aberto ? 'open' : ''}><summary class="small">Como chegou nesse valor</summary>${tab}</details>
+    ${pr.refs.length ? `<p class="small muted pz-ref">${pr.refs.join(' · ')}</p>` : ''}`;
+}
+
 function kpis() {
   const todos = vivos('pedidos'), at = ativosOrd(), cf = C();
   const naoCanc = todos.filter(p => p.status !== 'Cancelado');
@@ -149,7 +236,7 @@ function abrirModal(titulo, corpo, {onOk, onInput, salvarTxt = 'Salvar', extra =
   const f = $('#mf .m-c input, #mf .m-c select'); if (f) f.focus();
   if (modalInput) modalInput($('#mf'));
 }
-function fecharModal() { $('#modal').hidden = true; $('#modalBody').innerHTML = ''; modalOk = modalInput = null; if (S.adiado) { S.adiado = false; render(); } }
+function fecharModal() { $('#modal').hidden = true; $('#modalBody').innerHTML = ''; modalOk = modalInput = null; setTimeout(tentaRecarregar, 300); if (S.adiado) { S.adiado = false; render(); } }
 function erroModal(msg) { const e = $('#merr'); if (e) e.textContent = msg; }
 const confirmar = (titulo, texto, okTxt, fn) => abrirModal(titulo, `<p>${texto}</p>`, {onOk: () => { fn(); }, salvarTxt: okTxt});
 const fd = form => { const o = {}; new FormData(form).forEach((v, k) => o[k] = v); form.querySelectorAll('input[type=checkbox]').forEach(c => o[c.name] = c.checked); return o; };
@@ -189,12 +276,8 @@ function formPedido(id) {
   const extra = p ? `<button type="button" class="btn bad" data-a="excluir" data-col="pedidos" data-id="${esc(p.id)}">Excluir</button>` : '';
   abrirModal(novo ? 'Novo pedido' : 'Editar pedido', corpo, {extra, salvarTxt: novo ? 'Adicionar na fila' : 'Salvar',
     onInput: f => {
-      const h = num(f.horasEst.value, 0), tipo = f.tipo.value, cf = C();
-      const c = (p ? comprasDe(p) : 0) + (tipo === 'Acessório' ? 0 : cf.miudezas);
-      const box = $('#sugbox');
-      if (h > 0) { const justo = h * cf.valorHora + c;
-        box.innerHTML = `Sugestão: <b>${fR(r90(justo))}</b> · família: <b>${fR(r90(justo * (1 - cf.descontoFamilia)))}</b> <span class="muted small">(${fH(h)} × ${fR(cf.valorHora)}/h + ${fR(c)} de material)</span>`; }
-      else box.innerHTML = '<span class="muted">Põe as horas estimadas pra ver o preço sugerido.</span>';
+      $('#sugbox').innerHTML = precoHtml(sugerePreco({horas: num(f.horasEst.value, 0), tipo: f.tipo.value, material: p ? comprasDe(p) : 0,
+        prazo: f.prazo.value, desde: f.pedidoEm.value, rid: f.receitaId.value, pid: p?.id, feitasJa: p ? feitas(p) : 0}));
     },
     onOk: d => {
       if (!d.nome.trim()) { erroModal('Dá um nome pra peça.'); return false; }
@@ -299,6 +382,212 @@ function formDaReceita(rid) {
       });
     }});
 }
+// ---- Receita passo a passo ----
+// O texto (Markdown ou texto puro) vira uma lista de passos. Linhas tipo "R5: ...", "Rodada 5", "Carreira 3",
+// "Volta 2", "Row 4" ou "5ª carreira" são rodadas; "R7-R10" vira quatro passos. Títulos (# ou "Cabeça:") são partes.
+// O resto vira anotação, no lugar onde aparece. Sem rodadas reconhecidas, cada linha vira um passo.
+const RE_ROD = /^\s*(?:[-*+>]\s+)?(?:\*\*|__)?((?:rodadas?|rod|rd|rnd|rounds?|carreiras?|carr|voltas?|fileiras?|rows?|r|c|v)\.?\s*)(\d+)(?:\s*(?:-|–|—|a|até|ate|ao|to)\s*(?:(?:rodadas?|rod|rd|rnd|r|carr|c|v|rows?)\.?\s*)?(\d+))?\s*(?:\*\*|__)?\s*(?:[:.)\-–—]\s*|\s+|$)(?:\*\*|__)?\s*(.*)$/i;
+const RE_ROD2 = /^\s*(?:[-*+>]\s+)?(\d+)\s*[ªº°]\s*(?:(?:-|–|a|ao|até)\s*(\d+)\s*[ªº°]?\s*)?(rodadas?|carreiras?|voltas?|fileiras?)\b\s*[:.\-–—]?\s*(.*)$/i;
+const RE_TOT = /\s*[([]\s*(\d+)\s*(?:p|pt|pts|pb|pontos?|sts?|m)?\.?\s*[)\]]\s*\.?\s*$/i;
+const tirarMd = t => t.replace(/^\s*(?:[-*+>]\s+|\d+[.)]\s+)/, '').trim();
+function linhaRod(l) {
+  let m = RE_ROD.exec(l);
+  if (m) {
+    const pre = m[1].trim().replace(/\.$/, ''), ini = +m[2], fim = m[3] ? +m[3] : ini;
+    return {pre: pre.length <= 2 ? pre.toUpperCase() : pre[0].toUpperCase() + pre.slice(1).toLowerCase().replace(/s$/, ''), ini, fim, txt: (m[4] || '').replace(/(\*\*|__)\s*$/, '').trim(), sep: pre.length > 2 ? ' ' : ''};
+  }
+  m = RE_ROD2.exec(l);
+  if (m) { const pal = m[3].toLowerCase().replace(/s$/, ''); return {pre: pal[0].toUpperCase() + pal.slice(1), ini: +m[1], fim: m[2] ? +m[2] : +m[1], txt: (m[4] || '').trim(), sep: ' '}; }
+  return null;
+}
+const memoPassos = new Map();
+function passosReceita(texto) {
+  texto = str(texto);
+  if (memoPassos.has(texto)) return memoPassos.get(texto);
+  const linhas = texto.replace(/\r/g, '').split('\n').map(l => l.replace(/\s+$/, ''));
+  const temTitulo = linhas.some(l => /^\s*#{1,6}\s+\S/.test(l));
+  const itens = linhas.map(l => {
+    if (!l.trim() || /^\s*(-{3,}|\*{3,}|_{3,})\s*$/.test(l)) return {k: 'vazio'};
+    const h = /^\s*#{1,6}\s+(.*)$/.exec(l);
+    if (h) return {k: 'sec', txt: h[1].replace(/[*_]/g, '').trim()};
+    const r = linhaRod(l);
+    if (r && r.fim >= r.ini && r.fim - r.ini < 200) return {k: 'rod', ...r};
+    const t = tirarMd(l);
+    if (!temTitulo && t.length <= 40 && /:$/.test(t) && !/\d/.test(t.slice(0, 2))) return {k: 'sec', txt: t.slice(0, -1).replace(/[*_]/g, '').trim()};
+    if (!temTitulo && /^\*\*[^*]{1,40}\*\*:?$/.test(l.trim())) return {k: 'sec', txt: l.trim().replace(/[*:]/g, '').trim()};
+    return {k: 'txt', txt: t, num: (/^\s*(\d+)[.)]\s+/.exec(l) || [])[1] || ''};
+  });
+  const nRod = itens.filter(x => x.k === 'rod').length, out = [];
+  let sec = '', nota = [], aberto = null;
+  const soltaNota = () => { if (nota.length) { out.push({sec, rot: '', txt: nota.join('\n'), nota: true}); nota = []; } };
+  for (const x of itens) {
+    if (x.k === 'vazio') { aberto = null; if (nRod < 2) continue; soltaNota(); continue; }
+    if (x.k === 'sec') { aberto = null; soltaNota(); sec = x.txt; continue; }
+    if (nRod >= 2) {
+      if (x.k === 'rod') {
+        soltaNota(); aberto = null;
+        const tm = RE_TOT.exec(x.txt), tot = tm ? +tm[1] : null, n = x.fim - x.ini + 1, novos = [];
+        for (let k = x.ini; k <= x.fim; k++) novos.push({sec, rot: x.pre + x.sep + k, txt: x.txt, tot, rep: n > 1 ? [k - x.ini + 1, n] : null});
+        out.push(...novos);
+        if (!x.txt) aberto = novos;
+      } else if (aberto) {
+        // "R1" sozinho na linha: a instrução vem nas linhas de baixo
+        for (const y of aberto) { y.txt = y.txt ? y.txt + '\n' + x.txt : x.txt; const tm = RE_TOT.exec(y.txt); if (tm) y.tot = +tm[1]; }
+      } else nota.push(x.txt);
+    } else if (x.k === 'rod') {
+      const tm = RE_TOT.exec(x.txt); out.push({sec, rot: x.pre + x.sep + x.ini, txt: x.txt, tot: tm ? +tm[1] : null});
+    } else out.push({sec, rot: x.num, txt: x.txt, tot: null});
+  }
+  soltaNota();
+  for (const x of out) if (!x.txt) x.txt = '(sem texto)';
+  if (memoPassos.size > 30) memoPassos.clear();
+  memoPassos.set(texto, out);
+  return out;
+}
+const mdIn = t => esc(t).replace(/\*\*(.+?)\*\*/g, '<b>$1</b>').replace(/(^|[^*\w])\*(?!\s)([^*]+?)\*(?!\w)/g, '$1<i>$2</i>').replace(/`([^`]+)`/g, '<code>$1</code>');
+const cortar = (t, n) => t.length > n ? t.slice(0, n - 1).trimEnd() + '…' : t;
+function partesDe(t) {
+  const sem = t.replace(RE_TOT, ''), out = []; let nv = 0, cur = '';
+  for (const ch of sem) {
+    if ('([{'.includes(ch)) nv++; else if (')]}'.includes(ch)) nv = Math.max(0, nv - 1);
+    if ((ch === ',' || ch === ';') && !nv) { out.push(cur); cur = ''; } else cur += ch;
+  }
+  out.push(cur);
+  return out.map(x => x.trim()).filter(Boolean);
+}
+function bolas(t) {
+  const k = semAcento(t);
+  return vivos('estoque').filter(e => e.hex && e.cor.length >= 3 && new RegExp('(^|[^a-z])' + escRe(semAcento(e.cor)) + '($|[^a-z])').test(k))
+    .map(e => `<span class="bola" style="background:${e.hex}" title="${esc(e.cor)}"></span>`).join('');
+}
+const lerLS = (k, d) => { try { const v = localStorage.getItem(k); return v == null ? d : JSON.parse(v); } catch { return d; } };
+const gravaLS = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} };
+S.seg = lerLS('atelie-seg', null); S.segPartes = lerLS('atelie-seg-partes', false); S.segParte = 0; S.segLista = false; S.segLocal = null;
+function segCtx() {
+  const s = S.seg; if (!s) return null;
+  const r = rec(s.rid); if (!r) return null;
+  const p = s.pid ? ped(s.pid) : null;
+  if (s.pid && (!p || p.lixo)) return null;
+  const passos = passosReceita(r.texto), dono = p || r, chave = (p ? 'p' : 'r') + dono.id;
+  let i = Math.round(dono.passo || 0);
+  if (S.segLocal && S.segLocal.k === chave && Date.now() - S.segLocal.t < 4000) i = S.segLocal.i;
+  return {r, p, passos, i: Math.max(0, Math.min(passos.length - 1, i)), chave};
+}
+function segAbre(rid, pid) {
+  S.seg = {rid, pid: pid || ''}; gravaLS('atelie-seg', S.seg); S.segParte = 0; S.segLista = false;
+  if (location.hash === '#seguir') render(); else location.hash = 'seguir';
+}
+function segIr(i, parte = 0) {
+  const c = segCtx(); if (!c || !c.passos.length) return;
+  const j = Math.max(0, Math.min(c.passos.length - 1, i));
+  S.segParte = parte;
+  if (j !== c.i) {
+    S.segLocal = {k: c.chave, i: j, t: Date.now()};
+    if (c.p) mudar('pedidos', c.p.id, {passo: j}); else mudar('receitas', c.r.id, {passo: j});
+  }
+  agenda();
+}
+function segPasso(d) {
+  const c = segCtx(); if (!c || !c.passos.length) return;
+  const partes = S.segPartes ? partesDe(c.passos[c.i].txt) : [];
+  if (partes.length > 1) {
+    const np = Math.min(S.segParte, partes.length - 1) + d;
+    if (np >= 0 && np < partes.length) { S.segParte = np; agenda(); return; }
+  }
+  if (d > 0 && c.i >= c.passos.length - 1) { toast('Fim da receita!'); return; }
+  if (d < 0 && c.i === 0) return;
+  const pp = d < 0 && S.segPartes ? partesDe(c.passos[c.i - 1].txt) : [];
+  segIr(c.i + d, pp.length > 1 ? pp.length - 1 : 0);
+}
+function segReceita(rid) {
+  const r = rec(rid); if (!r) return;
+  if (!passosReceita(r.texto).length) { formReceita(rid); return; }
+  const ps = ativosOrd().filter(p => p.receitaId === rid && !FECHADOS.includes(p.status));
+  if (!ps.length) return segAbre(rid, '');
+  if (ps.length === 1 && ps[0].status === 'Fazendo') return segAbre(rid, ps[0].id);
+  const n = passosReceita(r.texto).length;
+  abrirModal('Seguir ' + r.personagem, `<p class="hint">Em qual peça? A rodada em que você parou fica guardada em cada peça.</p>
+    <div class="lista">${ps.map(p => `<button type="button" class="tm-item" data-a="segAbrir" data-rid="${esc(rid)}" data-id="${esc(p.id)}"><span class="grow"><b>${esc(p.nome)}</b><span class="small muted">${esc(p.status)} · passo ${Math.min(n, (p.passo || 0) + 1)} de ${n}</span></span></button>`).join('')}
+    <button type="button" class="tm-item" data-a="segAbrir" data-rid="${esc(rid)}" data-id=""><span class="grow"><b>Só ler a receita</b><span class="small muted">sem ligar a uma peça</span></span></button></div>`);
+}
+function listaPassos(passos, i) {
+  let sec = null, h = '';
+  passos.forEach((x, k) => {
+    if (x.sec !== sec) { sec = x.sec; if (sec) h += `<h3 class="seg-sec">${esc(sec)}</h3>`; }
+    h += `<div class="seg-li ${k === i ? 'on' : k < i ? 'ok' : ''} ${x.nota ? 'nota' : ''}" data-a="segIr" data-i="${k}" ${k === i ? 'id="segAqui"' : ''}>${x.rot ? `<b>${esc(x.rot)}</b> ` : ''}${mdIn(x.txt).replace(/\n/g, '<br>')}</div>`;
+  });
+  return `<div class="card seg-lista">${h}</div>`;
+}
+function vSeguir() {
+  const c = segCtx();
+  if (!c) return `<div class="empty">Escolhe uma receita na aba <a href="#receitas">Receitas</a> e toca em <b>Seguir</b>.</div>`;
+  const {r, p, passos, i} = c;
+  if (!passos.length) return `<div class="empty">${esc(r.personagem)} ainda não tem o texto da receita.<br><br><button class="btn pri" data-a="editReceita" data-id="${esc(r.id)}">Colar ou importar a receita</button></div>`;
+  const ps = passos[i], prox = passos[i + 1], todas = partesDe(ps.txt), partes = S.segPartes && todas.length > 1 ? todas : [];
+  const parte = Math.min(S.segParte, Math.max(0, partes.length - 1)), aqui = p && rodando() && S.timer.pedidoId === p.id;
+  const corpo = partes.length ? `<div class="seg-partes">${partes.map((t, k) => `<span class="seg-pt ${k === parte ? 'on' : k < parte ? 'ok' : ''}">${bolas(t)}${mdIn(t)}</span>`).join('')}</div>`
+    : `<div class="seg-txt">${bolas(ps.txt)}${mdIn(ps.txt).replace(/\n/g, '<br>')}</div>`;
+  return `<div class="segue">
+    <div class="seg-top"><button class="btn sm" data-a="nav" data-v="${p ? 'fila' : 'receitas'}">‹ ${p ? 'Fila' : 'Receitas'}</button><span class="sp"></span>
+      ${p ? `<button class="btn sm ${aqui ? 'pri' : ''}" data-a="tmToggle" data-id="${esc(p.id)}">${aqui ? 'Pausar' : 'Timer'} <span class="num" ${aqui ? 'data-clk="total"' : ''}>${fT(segTotal(p))}</span></button>` : ''}
+      <button class="btn sm" data-a="segLista">${S.segLista ? 'Passo a passo' : 'Ver tudo'}</button></div>
+    <div><h2 class="seg-nome">${esc(r.personagem)}${p ? ` <span class="muted">· ${esc(p.nome)}</span>` : ''}</h2>
+      <div class="seg-prog"><div class="bar"><i style="width:${Math.round((i + 1) / passos.length * 100)}%"></i></div><span class="small muted num">${i + 1} de ${passos.length}</span></div>
+      ${ps.sec ? `<div class="small muted">${esc(ps.sec)}</div>` : ''}</div>
+    ${S.segLista ? listaPassos(passos, i) : `
+    <div class="seg-atual ${ps.nota ? 'nota' : ''}" data-a="segProx" role="button" tabindex="0" aria-label="Avançar">
+      ${ps.rot ? `<div class="seg-rot">${esc(ps.rot)}${ps.rep ? ` <small>${ps.rep[0]} de ${ps.rep[1]}</small>` : ''}${ps.tot ? ` <span class="pill t-pronta">${ps.tot} pontos</span>` : ''}${partes.length ? ` <small>parte ${parte + 1} de ${partes.length}</small>` : ''}</div>` : (ps.nota ? '<div class="seg-rot nota">Anotação</div>' : '')}
+      ${corpo}
+    </div>
+    <p class="seg-dps small muted">${prox ? `Depois: ${prox.rot ? '<b>' + esc(prox.rot) + '</b> ' : ''}${mdIn(cortar(prox.txt.replace(/\n/g, ' '), 90))}` : 'Último passo.'}</p>
+    <div class="seg-btns"><button class="btn" data-a="segAnt" ${i === 0 && parte === 0 ? 'disabled' : ''}>‹ Voltar</button><button class="btn pri" data-a="segProx">Próxima ›</button></div>
+    <div class="seg-opc">${todas.length > 1 || S.segPartes ? `<label class="chk"><input type="checkbox" data-c="segPartes" ${S.segPartes ? 'checked' : ''}> Passar cada rodada por partes (bom pra tapestry)</label>` : ''}
+      <p class="hint">Toque no passo pra avançar.${AND ? ' Volume +: avança. Volume −: volta.' : ' No computador: espaço ou → avança, ← volta.'}</p></div>`}
+  </div>`;
+}
+function recNoTimer(p) {
+  const r = p && rec(p.receitaId), passos = r ? passosReceita(r.texto) : [];
+  if (!passos.length) return '';
+  if (!S.seg || S.seg.pid !== p.id) { S.seg = {rid: r.id, pid: p.id}; gravaLS('atelie-seg', S.seg); S.segParte = 0; }
+  const c = segCtx(); if (!c) return '';
+  const ps = passos[c.i];
+  return `<div class="card tm-rec"><div class="small muted">Receita · passo ${c.i + 1} de ${passos.length}${ps.sec ? ' · ' + esc(ps.sec) : ''}</div>
+    <div class="tm-rec-txt">${ps.rot ? `<b>${esc(ps.rot)}</b> ` : ''}${bolas(ps.txt)}${mdIn(cortar(ps.txt.replace(/\n/g, ' '), 160))}</div>
+    <div class="tm-rec-btns"><button class="btn sm" data-a="segAnt" aria-label="Passo anterior">‹</button><button class="btn sm pri" data-a="segProx">Próxima ›</button><button class="btn sm" data-a="segPedido" data-id="${esc(p.id)}">Abrir receita</button></div></div>`;
+}
+async function textoDeArquivo(arq) {
+  const nome = arq.name.toLowerCase();
+  if (nome.endsWith('.pdf') || arq.type === 'application/pdf') {
+    const base = 'https://cdn.jsdelivr.net/npm/pdfjs-dist@6.4.299/legacy/build/';
+    const pdfjs = await import(base + 'pdf.min.mjs');
+    pdfjs.GlobalWorkerOptions.workerSrc = base + 'pdf.worker.min.mjs';
+    const doc = await pdfjs.getDocument({data: new Uint8Array(await arq.arrayBuffer())}).promise, out = [];
+    for (let n = 1; n <= doc.numPages; n++) {
+      const tc = await (await doc.getPage(n)).getTextContent();
+      let linha = '', y = null;
+      for (const it of tc.items) {
+        if (typeof it.str !== 'string') continue;
+        const yy = Math.round(it.transform[5]);
+        if (y !== null && Math.abs(yy - y) > 2 && linha.trim()) { out.push(linha.trim()); linha = ''; }
+        linha += it.str; y = yy;
+        if (it.hasEOL) { if (linha.trim()) out.push(linha.trim()); linha = ''; y = null; }
+      }
+      if (linha.trim()) out.push(linha.trim());
+      out.push('');
+    }
+    const t = out.join('\n').replace(/[ \t]+/g, ' ').replace(/\n{3,}/g, '\n\n').trim();
+    if (!t) throw new Error('Esse PDF não tem texto (parece foto ou scan). Dá pra digitar ou colar a receita.');
+    return t;
+  }
+  if (/\.(md|markdown|txt|text)$/.test(nome) || /^text\//.test(arq.type)) return (await arq.text()).replace(/^﻿/, '');
+  throw new Error('Formato não suportado. Usa .md, .txt ou .pdf.');
+}
+function resumoPassos(t) {
+  const ps = passosReceita(t); if (!ps.length) return 'Sem passos ainda.';
+  const rods = ps.filter(x => !x.nota).length, secs = new Set(ps.map(x => x.sec).filter(Boolean)).size;
+  return `${ps.length} ${plural(ps.length, 'passo', 'passos')}: ${rods} ${plural(rods, 'rodada', 'rodadas')}${ps.length - rods ? ` e ${ps.length - rods} ${plural(ps.length - rods, 'anotação', 'anotações')}` : ''}${secs ? ` em ${secs} ${plural(secs, 'parte', 'partes')}` : ''}.`;
+}
+
 function formHoras(pid, hid) {
   const h = hid ? S.horas.find(x => x.id === hid) : null;
   const padrao = h?.pedidoId || pid || (ativosOrd().find(p => p.status === 'Fazendo') || ativosOrd()[0])?.id || '';
@@ -394,12 +683,18 @@ function formReceita(rid) {
     ${campo('tipoPadrao', 'Tipo', sel('tipoPadrao', TIPOS, r?.tipoPadrao || 'Receita pronta'))}
     ${campo('horasPadrao', 'Horas por peça', numInp('horasPadrao', r?.horasPadrao, r ? `placeholder="${(() => { const st = statsReceita(r); return st.media != null ? 'média: ' + fN(st.media) : ''; })()}"` : ''))}
     ${campo('precoPadrao', 'Preço (R$)', numInp('precoPadrao', r?.precoPadrao, 'placeholder="0 = brinde"'))}
-    ${campo('acompanhaId', 'Fazer junto (acessório)', `<select id="acompanhaId" name="acompanhaId"><option value="">Nada</option>${recsOrd().filter(x => !r || x.id !== r.id).map(x => `<option value="${esc(x.id)}"${r && x.id === r.acompanhaId ? ' selected' : ''}>${esc(x.personagem)}</option>`).join('')}</select>`)}</div>`;
+    ${campo('acompanhaId', 'Fazer junto (acessório)', `<select id="acompanhaId" name="acompanhaId"><option value="">Nada</option>${recsOrd().filter(x => !r || x.id !== r.id).map(x => `<option value="${esc(x.id)}"${r && x.id === r.acompanhaId ? ' selected' : ''}>${esc(x.personagem)}</option>`).join('')}</select>`)}
+    <div class="field full"><label for="texto">Receita (texto)</label>
+      <textarea id="texto" name="texto" rows="12" spellcheck="false" placeholder="Cola aqui ou importa um arquivo. Exemplo:&#10;# Cabeça&#10;R1: 6 pb no anel mágico (6)&#10;R2: 6 aum (12)&#10;R3-R5: 1 pb em cada (12)">${esc(r?.texto || '')}</textarea></div>
+    <div class="full rec-imp"><label class="btn sm" for="recArq">Importar arquivo</label><input type="file" id="recArq" accept=".md,.markdown,.txt,.pdf,text/plain,text/markdown,application/pdf" hidden>
+      <span class="small muted">.md, .txt ou .pdf (do PDF vem só o texto)</span></div>
+    <p class="hint full" id="recPassos"></p></div>`;
   const extra = r ? `<button type="button" class="btn bad" data-a="excluir" data-col="receitas" data-id="${esc(r.id)}">Excluir</button>` : '';
-  abrirModal(r ? 'Editar receita' : 'Nova receita', corpo, {extra, onOk: d => {
+  abrirModal(r ? 'Editar receita' : 'Nova receita', corpo, {extra, onInput: fm => { $('#recPassos').textContent = resumoPassos(fm.texto.value); }, onOk: d => {
     if (!d.personagem.trim()) { erroModal('Diz o personagem.'); return false; }
     const patch = {personagem: d.personagem.trim(), fonte: d.fonte, autor: d.autor.trim(), altura: num(d.altura), arquivo: d.arquivo.trim(),
-      tipoPadrao: d.tipoPadrao, horasPadrao: num(d.horasPadrao), precoPadrao: num(d.precoPadrao), acompanhaId: d.acompanhaId || ''};
+      tipoPadrao: d.tipoPadrao, horasPadrao: num(d.horasPadrao), precoPadrao: num(d.precoPadrao), acompanhaId: d.acompanhaId || '', texto: (d.texto || '').replace(/\s+$/, '')};
+    if (patch.texto.length > 600000) { erroModal('Texto grande demais (mais de 600 mil letras).'); return false; }
     if (r) mudar('receitas', r.id, patch, 'Receita salva'); else { patch.lixo = false; criar('receitas', patch, 'Receita adicionada'); }
   }});
 }
@@ -460,7 +755,8 @@ async function tela(on) {
     else if (!on && wl) { const w = wl; wl = null; await w.release(); }
   } catch {}
 }
-document.addEventListener('visibilitychange', () => tela(S.view === 'timer' && rodando()));
+const querTela = () => (S.view === 'timer' && rodando()) || (S.view === 'seguir' && !!segCtx());
+document.addEventListener('visibilitychange', () => { tela(querTela()); if (document.visibilityState === 'visible') tentaRecarregar(); });
 
 function vTimer() {
   const run = rodando();
@@ -483,6 +779,7 @@ function vTimer() {
     ${outro ? `<p class="aviso small">O timer está rodando em <b>${esc(nomePed(S.timer.pedidoId))}</b>. Começar aqui pausa lá e salva o tempo.</p>` : ''}
     <button class="tm-go ${aqui ? 'on' : ''}" data-a="tmToggle" data-id="${esc(p.id)}">${aqui ? 'Pausar' : tot > 0 ? 'Continuar' : 'Começar'}</button>
     <button class="btn tm-done" data-a="tmTerminei" data-id="${esc(p.id)}">Terminei</button>
+    ${recNoTimer(p)}
   </div>`;
 }
 
@@ -535,6 +832,7 @@ function cardPedido(p, pos, primeiro, ultimo) {
     <div class="ped-acts">
       <label class="chk"><input type="checkbox" data-c="pago" data-id="${esc(p.id)}" ${p.pago ? 'checked' : ''}> Pago</label>
       ${saiu ? '' : `<button class="btn sm ${rodando() && S.timer.pedidoId === p.id ? 'pri' : ''}" data-a="tmAbrir" data-id="${esc(p.id)}">Timer <span class="num" ${rodando() && S.timer.pedidoId === p.id ? 'data-clk="total"' : ''}>${fT(segTotal(p))}</span></button>`}
+      ${(() => { const rr = rec(p.receitaId), n = rr ? passosReceita(rr.texto).length : 0; return n && !saiu ? `<button class="btn sm" data-a="segPedido" data-id="${esc(p.id)}">Receita <span class="num">${Math.min(n, (p.passo || 0) + 1)}/${n}</span></button>` : ''; })()}
       <span class="sp"></span>
       ${pos ? `<button class="icon" data-a="subir" data-id="${esc(p.id)}" aria-label="Subir ${esc(p.nome)} na fila" ${primeiro ? 'disabled' : ''}>↑</button><button class="icon" data-a="descer" data-id="${esc(p.id)}" aria-label="Descer ${esc(p.nome)} na fila" ${ultimo ? 'disabled' : ''}>↓</button>` : ''}
       <button class="btn sm" data-a="editPedido" data-id="${esc(p.id)}">Editar</button>
@@ -587,19 +885,27 @@ function vEstoque() {
     <button class="sit sit-${e.situacao === 'Não tenho' ? 'Nao' : e.situacao}" data-a="ciclarSit" data-id="${esc(e.id)}" aria-label="${esc(e.cor)}: ${esc(e.situacao)}. Toque pra trocar">${esc(e.situacao)}</button></div>`).join('') : '<div class="empty">Nenhuma cor ainda.</div>'}</div>`;
 }
 function vCalc() {
-  return `<h2>Calculadora de preço</h2><p class="hint">É só sugestão: quem fecha o preço é você.</p>
+  const cf = C();
+  return `<h2>Calculadora de preço</h2><p class="hint">É só sugestão: quem fecha o preço é você. As porcentagens ficam na Config.</p>
   <div class="calc"><div class="card">
     ${campo('cHoras', 'Horas que você acha que vai levar', numInp('cHoras', S.calc.horas))}
+    ${campo('cTipo', 'Tipo', sel('cTipo', TIPOS, S.calc.tipo))}
+    ${campo('cRec', 'Receita (opcional)', selReceita('cRec', S.calc.rid, 'Nenhuma'))}
     ${campo('cNov', 'Novelos novos só pra essa peça', numInp('cNov', S.calc.novelos))}
     ${campo('cOut', 'Outros gastos da peça (R$)', numInp('cOut', S.calc.outros))}
+    ${cf.urgencia > 0 ? campo('cPrazo', 'Prazo (pra taxa de urgência)', inp('cPrazo', S.calc.prazo, 'type="date"')) : ''}
+    <p class="hint">Sem novelos nem outros gastos, o material vem da média das peças já feitas dessa receita.</p>
   </div><div class="card" id="calcRes">${calcRes()}</div></div>`;
 }
 function calcRes() {
-  const cf = C(), h = num(S.calc.horas, 0), mat = cf.miudezas + num(S.calc.novelos, 0) * cf.precoNovelo + num(S.calc.outros, 0);
-  if (!(h > 0)) return '<p class="muted">Põe as horas.</p>';
-  const justo = h * cf.valorHora + mat, sug = r90(justo), fam = r90(justo * (1 - cf.descontoFamilia));
-  return `<div><small class="muted">Preço sugerido</small><div class="res-big num">${fR(sug)}</div></div>
-    ${kv([['Preço justo', fR(justo)], ['Sua hora no sugerido', fR((sug - mat) / h) + '/h'], ['Preço pra família/amigos', fR(fam)], ['Sua hora no de família', fR((fam - mat) / h) + '/h'], ['Material contado', fR(mat)]])}`;
+  const cf = C(), c = S.calc;
+  const pr = sugerePreco({horas: num(c.horas, 0), tipo: c.tipo, extraMat: num(c.novelos, 0) * cf.precoNovelo + num(c.outros, 0), prazo: c.prazo, rid: c.rid});
+  if (!pr) return '<p class="muted">Põe as horas.</p>';
+  const k = kpis();
+  return `<div><small class="muted">Preço sugerido</small><div class="res-big num">${fR(pr.sug)}</div></div>
+    ${kv([['Sua hora no sugerido', fR(pr.horaSug) + '/h'], ['Preço pra família/amigos', fR(pr.fam)], ['Sua hora no de família', fR(pr.horaFam) + '/h'],
+      ...(k.horaReal != null ? [['Sua hora real nas vendas até agora', fR(k.horaReal) + '/h']] : [])])}
+    <div class="pz">${precoHtml(pr, true, true)}</div>`;
 }
 function vReceitas() {
   const rs = vivos('receitas').sort((a, b) => a.personagem.localeCompare(b.personagem));
@@ -607,9 +913,10 @@ function vReceitas() {
   return `<div class="head"><h2>Receitas</h2><span class="sp"></span><button class="btn pri" data-a="novaReceita">+ Receita</button></div>
   <div class="card">${rs.length ? rs.map(r => { const st = statsReceita(r), ac = rec(r.acompanhaId), px = proxNum(r);
     const linha2 = [esc(r.autor), r.altura ? fN(r.altura) + ' cm' : '', r.arquivo ? esc(r.arquivo) : ''].filter(Boolean).join(' · ');
-    const linha3 = [st.total ? `${st.total} ${plural(st.total, 'pedido', 'pedidos')}` : 'nenhum pedido ainda', st.media != null ? 'média ' + fH(st.media) : '', st.preco != null ? (st.preco === 0 ? 'brinde' : fR(st.preco)) : '', ac ? 'junto: ' + esc(ac.personagem) : '', 'próximo: ' + esc(nomeNum(r, px.n, px.hash))].filter(Boolean).join(' · ');
+    const np = passosReceita(r.texto).length;
+    const linha3 = [np ? `${np} ${plural(np, 'passo', 'passos')}` : '', st.total ? `${st.total} ${plural(st.total, 'pedido', 'pedidos')}` : 'nenhum pedido ainda', st.media != null ? 'média ' + fH(st.media) : '', st.preco != null ? (st.preco === 0 ? 'brinde' : fR(st.preco)) : '', ac ? 'junto: ' + esc(ac.personagem) : '', 'próximo: ' + esc(nomeNum(r, px.n, px.hash))].filter(Boolean).join(' · ');
     return `<div class="row"><span class="grow"><b>${esc(r.personagem)}</b><br><span class="small muted">${linha2}${linha2 ? '<br>' : ''}${linha3}</span></span>
-    <span class="pill ${cls[r.fonte]}">${esc(r.fonte)}</span><button class="btn sm" data-a="editReceita" data-id="${esc(r.id)}">Editar</button><button class="btn sm pri" data-a="pedidoReceita" data-id="${esc(r.id)}">+ Pedido</button></div>`; }).join('') : '<div class="empty">Nenhuma receita ainda.</div>'}</div>`;
+    <span class="pill ${cls[r.fonte]}">${esc(r.fonte)}</span><button class="btn sm" data-a="editReceita" data-id="${esc(r.id)}">Editar</button>${np ? `<button class="btn sm" data-a="segReceita" data-id="${esc(r.id)}">Seguir</button>` : ''}<button class="btn sm pri" data-a="pedidoReceita" data-id="${esc(r.id)}">+ Pedido</button></div>`; }).join('') : '<div class="empty">Nenhuma receita ainda.</div>'}</div>`;
 }
 function vConfig() {
   const cf = C(), lixo = COLS.flatMap(c => S[c].filter(x => x.lixo).map(x => ({c, x})));
@@ -622,6 +929,19 @@ function vConfig() {
     ${campo('descontoFamilia', 'Desconto família/amigos (%)', numInp('descontoFamilia', Math.round(cf.descontoFamilia * 100)))}
     ${campo('metaNatal', 'Meta do Natal (R$)', numInp('metaNatal', cf.metaNatal))}
   </div><p class="hint">Miudezas são olhinhos, fibra e botões: entram no custo de todo boneco (acessório não).</p>
+  <h3 class="cfg-sub">Preço sugerido</h3>
+  <div class="fgrid">
+    ${campo('indiretos', 'Custos indiretos (%)', numInp('indiretos', cf.indiretos))}
+    ${campo('embalagem', 'Embalagem por peça (R$)', numInp('embalagem', cf.embalagem))}
+    ${campo('extraSimples', 'Criação: custom simples (% no trabalho)', numInp('extraSimples', cf.extraSimples))}
+    ${campo('extraMedio', 'Criação: custom médio (%)', numInp('extraMedio', cf.extraMedio))}
+    ${campo('extraComplexo', 'Criação: custom complexo (%)', numInp('extraComplexo', cf.extraComplexo))}
+    ${campo('taxaPag', 'Taxa de pagamento (%)', numInp('taxaPag', cf.taxaPag, 'placeholder="0 = Pix"'))}
+    ${campo('urgencia', 'Taxa de urgência (% no trabalho)', numInp('urgencia', cf.urgencia, 'placeholder="0 = desligada"'))}
+    ${campo('urgDias', 'Urgente se o prazo for de até (dias)', numInp('urgDias', cf.urgDias))}
+    <label class="chk full"><input type="checkbox" name="corrigeHoras" ${cf.corrigeHoras ? 'checked' : ''}> Corrigir minhas estimativas de horas pelo que as peças prontas levaram de verdade</label>
+  </div>
+  <p class="hint">Indiretos cobrem luz, agulhas e desgaste. Criação é o tempo de adaptar ou criar a receita de uma peça custom. A taxa de pagamento é somada de um jeito que você recebe o valor cheio. O desconto de família vale só sobre o trabalho: material e custos sempre ficam cobertos.</p>
   <div><button class="btn pri" type="submit">Salvar config</button></div></form>
   <section class="card"><h2>Instalar como app</h2>${AND ? '<p class="hint">Você está usando o app Android.</p>' : `${S.inst ? '<div><button class="btn pri" data-a="instalar">Instalar app</button></div>' : ''}
     <p class="hint">${matchMedia('(display-mode: standalone)').matches ? 'Você já está usando o app instalado.' : 'iPhone (Safari): botão Compartilhar > <b>Adicionar à Tela de Início</b>. PC (Chrome ou Edge): ícone de instalar na barra de endereço.'}</p>
@@ -632,7 +952,7 @@ function vConfig() {
     <p class="hint">Conta: ${esc(S.user?.email || '')}</p></section>
   <section class="card"><h2>Lixeira (${lixo.length})</h2>${lixo.length ? lixo.map(o => `<div class="row"><span class="grow">${esc(nomeLixo(o))}</span><button class="btn sm" data-a="desfazer" data-col="${o.c}" data-id="${esc(o.x.id)}">Voltar</button><button class="btn sm bad" data-a="apagar" data-col="${o.c}" data-id="${esc(o.x.id)}">Apagar de vez</button></div>`).join('') : '<p class="muted">Vazia.</p>'}</section>`;
 }
-const VIEW_FN = {timer: vTimer, painel: vPainel, fila: vFila, horas: vHoras, compras: vCompras, estoque: vEstoque, calculadora: vCalc, receitas: vReceitas, config: vConfig};
+const VIEW_FN = {seguir: vSeguir, timer: vTimer, painel: vPainel, fila: vFila, horas: vHoras, compras: vCompras, estoque: vEstoque, calculadora: vCalc, receitas: vReceitas, config: vConfig};
 
 function vLogin() {
   return `<div class="login"><img src="icon-192.png" alt=""><h2>Entra pra ver seus pedidos</h2>
@@ -658,16 +978,17 @@ function renderNav() {
 function render() {
   const ae = document.activeElement;
   if (!$('#modal').hidden || (ae && $('#app').contains(ae) && /INPUT|SELECT|TEXTAREA/.test(ae.tagName) && ['config', 'calculadora'].includes(S.view))) { S.adiado = true; renderNav(); renderTimer(); return; }
-  S.adiado = false; renderNav(); renderTimer(); andTimer();
+  fhMemo = undefined; S.adiado = false; renderNav(); renderTimer(); andTimer();
   const m = $('#app');
   if (S.setup) { m.innerHTML = vSetup(); return; }
   if (S.user === null) { m.innerHTML = '<div class="empty">Carregando…</div>'; return; }
   if (S.user === false) { m.innerHTML = vLogin(); return; }
   m.innerHTML = VIEW_FN[S.view]();
-  tela(S.view === 'timer' && rodando());
+  tela(querTela());
+  andVolume(!!(S.view === 'seguir' || (S.view === 'timer' && $('.tm-rec'))) && !!segCtx() && !S.segLista);
 }
 let rq = false;
-function agenda() { andTimer(); if (rq) return; rq = true; requestAnimationFrame(() => { rq = false; render(); }); }
+function agenda() { fhMemo = undefined; andTimer(); if (rq) return; rq = true; requestAnimationFrame(() => { rq = false; render(); }); }
 function rota() { const h = (location.hash || '').slice(1); S.view = VIEW_FN[h] ? h : (rodando() ? 'timer' : 'painel'); if (S.view !== 'timer') S.tp = null; render(); window.scrollTo(0, 0); }
 addEventListener('hashchange', rota);
 addEventListener('online', agenda);
@@ -700,6 +1021,10 @@ document.addEventListener('click', e => {
     novoPedido: () => formPedido(), editPedido: () => formPedido(id), lancarHoras: () => formHoras(id), editHoras: () => formHoras(null, id),
     novaCompra: () => formCompra(), editCompra: () => formCompra(id), novaCor: () => formCor(), editCor: () => formCor(id),
     novaReceita: () => formReceita(), editReceita: () => formReceita(id), pedidoReceita: () => formDaReceita(id),
+    segReceita: () => segReceita(id), segPedido: () => { const p = ped(id); if (p) segAbre(p.receitaId, p.id); },
+    segAbrir: () => { fecharModal(); segAbre(b.dataset.rid, id); }, segProx: () => segPasso(1), segAnt: () => segPasso(-1),
+    segIr: () => { S.segLista = false; segIr(+b.dataset.i); window.scrollTo(0, 0); },
+    segLista: () => { S.segLista = !S.segLista; render(); if (S.segLista) $('#segAqui')?.scrollIntoView({block: 'center'}); },
     tmPausa: () => timerPausa(), tmEscolher: () => { S.tp = id; render(); }, tmTrocar: () => { S.tp = 'escolher'; render(); },
     tmToggle: () => { if (rodando() && S.timer.pedidoId === id) timerPausa(); else timerStart(id); },
     tmTerminei: () => terminei(id), tmAbrir: () => { S.tp = id; if (location.hash === '#timer') render(); else location.hash = 'timer'; },
@@ -719,12 +1044,28 @@ $('#sair').addEventListener('click', () => confirmar('Sair da conta?', 'Neste ap
 document.addEventListener('keydown', e => {
   if (e.key === 'Escape' && !$('#modal').hidden) fecharModal();
   if (e.key === 'Enter' && e.target.matches('h3[data-a]')) e.target.click();
+  if (S.view === 'seguir' && $('#modal').hidden && !/INPUT|TEXTAREA|SELECT/.test(document.activeElement?.tagName || '') && !e.ctrlKey && !e.metaKey && !e.altKey) {
+    const botao = /BUTTON|A/.test(document.activeElement?.tagName || '') && [' ', 'Enter'].includes(e.key);
+    if (botao) return;
+    if (['ArrowRight', ' ', 'PageDown', 'Enter'].includes(e.key)) { e.preventDefault(); segPasso(1); }
+    else if (['ArrowLeft', 'PageUp', 'Backspace'].includes(e.key)) { e.preventDefault(); segPasso(-1); }
+  }
 });
 document.addEventListener('change', e => {
   const t = e.target, c = t.dataset.c, id = t.dataset.id;
   if (c === 'status') { const p = ped(id); const patch = {status: t.value}; if (t.value === 'Entregue' && p && !p.entregueEm) patch.entregueEm = hoje(); mudar('pedidos', id, patch, t.value === 'Entregue' ? 'Entregue!' : ''); }
   else if (c === 'pago') mudar('pedidos', id, {pago: t.checked}, t.checked ? 'Marcado como pago' : '');
   else if (c === 'comprado') { const it = S.compras.find(x => x.id === id); if (t.checked && it) comprou([it]); else mudar('compras', id, {comprado: false, compradoEm: ''}); }
+  else if (c === 'segPartes') { S.segPartes = t.checked; gravaLS('atelie-seg-partes', t.checked); S.segParte = 0; render(); }
+  else if (t.id === 'recArq' && t.files[0]) {
+    const arq = t.files[0]; t.value = ''; $('#recPassos').textContent = 'Lendo ' + arq.name + '…';
+    textoDeArquivo(arq).then(txt => {
+      const ta = $('#texto'); if (!ta) return;
+      if (ta.value.trim() && !confirm('Trocar o texto que já está aí pelo do arquivo?')) { $('#recPassos').textContent = resumoPassos(ta.value); return; }
+      ta.value = txt; ta.dispatchEvent(new Event('input', {bubbles: true}));
+      const fm = $('#mf'); if (fm && !fm.personagem.value.trim()) fm.personagem.value = arq.name.replace(/\.[^.]+$/, '').replace(/[_-]+/g, ' ').trim();
+    }).catch(e => { $('#recPassos').textContent = ''; erroModal(e.message || 'Não consegui ler o arquivo.'); });
+  }
   else if (t.id === 'hexPick') setHex(t.value.toLowerCase());
   else if (t.id === 'fotoCor' && t.files[0]) { const f = t.files[0]; t.value = ''; corDaFoto(f).then(setHex).catch(() => toast('Não consegui ler a foto.', true)); }
 });
@@ -732,16 +1073,24 @@ document.addEventListener('toggle', e => { const t = e.target.dataset && e.targe
 document.addEventListener('input', e => {
   if (e.target.closest('#mf') && modalInput) modalInput($('#mf'));
   const id = e.target.id;
-  if (id === 'cHoras' || id === 'cNov' || id === 'cOut') { S.calc[{cHoras: 'horas', cNov: 'novelos', cOut: 'outros'}[id]] = e.target.value; $('#calcRes').innerHTML = calcRes(); }
+  const ck = {cHoras: 'horas', cNov: 'novelos', cOut: 'outros', cTipo: 'tipo', cRec: 'rid', cPrazo: 'prazo'}[id];
+  if (ck) {
+    S.calc[ck] = e.target.value;
+    if (ck === 'rid') { const r = rec(e.target.value); if (r) { const st = statsReceita(r); if (st.horas) { S.calc.horas = st.horas; $('#cHoras').value = st.horas; } S.calc.tipo = r.tipoPadrao; $('#cTipo').value = r.tipoPadrao; } }
+    $('#calcRes').innerHTML = calcRes();
+  }
 });
-document.addEventListener('focusout', () => { setTimeout(() => { if (S.adiado && $('#modal').hidden && !($('#app').contains(document.activeElement) && /INPUT|SELECT/.test(document.activeElement.tagName))) render(); }, 0); });
+document.addEventListener('focusout', () => { setTimeout(() => { if (S.adiado && $('#modal').hidden && !($('#app').contains(document.activeElement) && /INPUT|SELECT/.test(document.activeElement.tagName))) render(); tentaRecarregar(); }, 0); });
 document.addEventListener('submit', e => {
   e.preventDefault();
   if (e.target.id === 'mf') { const d = fd(e.target); const cb = modalOk; if (cb && cb(d) !== false) fecharModal(); }
   else if (e.target.id === 'cfgForm') {
     const d = fd(e.target);
     document.activeElement && document.activeElement.blur();
-    mudarMeta('config', {valorHora: num(d.valorHora, 13), precoNovelo: num(d.precoNovelo, 20), miudezas: num(d.miudezas, 0), descontoFamilia: num(d.descontoFamilia, 0) / 100, metaNatal: num(d.metaNatal)}, 'Config salva');
+    const pc = (k, v) => Math.max(0, num(d[k], v));
+    mudarMeta('config', {valorHora: num(d.valorHora, 13), precoNovelo: num(d.precoNovelo, 20), miudezas: num(d.miudezas, 0), descontoFamilia: num(d.descontoFamilia, 0) / 100, metaNatal: num(d.metaNatal),
+      indiretos: pc('indiretos', 0), embalagem: pc('embalagem', 0), extraSimples: pc('extraSimples', 0), extraMedio: pc('extraMedio', 0), extraComplexo: pc('extraComplexo', 0),
+      taxaPag: Math.min(30, pc('taxaPag', 0)), urgencia: pc('urgencia', 0), urgDias: pc('urgDias', 7), corrigeHoras: !!d.corrigeHoras}, 'Config salva');
   }
 });
 
@@ -800,7 +1149,7 @@ function planilha() {
   add('Compras', [['Item', 'Tipo', 'Cor', 'Qtd', 'Preço un.', 'Total', 'Pra', 'Onde', 'Comprado'], ...vivos('compras').map(c => [c.item, c.tipo, c.cor, c.qtd, c.precoUn, c.qtd * c.precoUn, nomePed(c.pedidoId), c.onde, c.comprado ? 'Sim' : 'Não'])]);
   add('Estoque', [['Cor', 'Situação'], ...vivos('estoque').map(e => [e.cor, e.situacao])]);
   add('Receitas', [['Personagem', 'Fonte', 'Autor', 'Altura (cm)', 'Arquivo', 'Tipo', 'Horas por peça', 'Preço', 'Faz junto', 'Feitos', 'Média de horas'], ...vivos('receitas').map(r => { const st = statsReceita(r); return [r.personagem, r.fonte, r.autor, r.altura, r.arquivo, r.tipoPadrao, r.horasPadrao, r.precoPadrao, rec(r.acompanhaId)?.personagem || '', st.total, st.media == null ? '' : Math.round(st.media * 100) / 100]; })]);
-  const cf = C(); add('Config', [['Parâmetro', 'Valor'], ['Valor da hora', cf.valorHora], ['Preço do novelo', cf.precoNovelo], ['Miudezas por boneco', cf.miudezas], ['Desconto família', cf.descontoFamilia], ['Meta do Natal', cf.metaNatal]]);
+  const cf = C(); add('Config', [['Parâmetro', 'Valor'], ['Valor da hora', cf.valorHora], ['Preço do novelo', cf.precoNovelo], ['Miudezas por boneco', cf.miudezas], ['Desconto família', cf.descontoFamilia], ['Meta do Natal', cf.metaNatal], ['Custos indiretos (%)', cf.indiretos], ['Embalagem', cf.embalagem], ['Criação custom simples (%)', cf.extraSimples], ['Criação custom médio (%)', cf.extraMedio], ['Criação custom complexo (%)', cf.extraComplexo], ['Taxa de pagamento (%)', cf.taxaPag], ['Urgência (%)', cf.urgencia], ['Urgente até (dias)', cf.urgDias], ['Corrigir horas pelo histórico', cf.corrigeHoras ? 'Sim' : 'Não']]);
   baixar(`atelie-${hoje()}.xlsx`, X.write(wb, {type: 'array', bookType: 'xlsx'}), 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
 }
 
@@ -822,6 +1171,7 @@ function ligar(u) {
 }
 
 function init() {
+  try { if (sessionStorage.getItem('atelie-atualizou')) { sessionStorage.removeItem('atelie-atualizou'); setTimeout(() => toast('App atualizado'), 600); } } catch {}
   rota();
   if (!cfg || !cfg.apiKey) { S.setup = true; render(); return; }
   const app = initializeApp(cfg);

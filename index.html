@@ -226,6 +226,51 @@ code{font-family:var(--mono);font-size:85%;background:var(--gray-soft);padding:2
 .seg button.on{background:var(--surface);font-weight:600;box-shadow:inset 0 -2px 0 var(--accent)}
 .vh{position:absolute;opacity:0;width:1px;height:1px;pointer-events:none}
 label.btn{display:inline-block}
+.field textarea{border:1px solid var(--line);background:var(--surface);color:inherit;border-radius:6px;padding:8px 12px;line-height:1.5;width:100%;min-height:200px;resize:vertical;font-family:var(--mono);font-size:13px;box-shadow:inset 0 1px 0 #d1d9e033}
+.field textarea:focus{border-color:var(--blue);outline:1px solid var(--blue);outline-offset:-1px}
+.rec-imp{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.cfg-sub{font-size:14px;margin:8px 0 0}
+.pz-top{display:flex;gap:6px 16px;flex-wrap:wrap;align-items:baseline}
+.pz-v{font-size:16px}
+.pz-t{width:100%;border-collapse:collapse;font-size:13px;margin-top:6px}
+.pz-t td{padding:6px 0;border-bottom:1px solid var(--line-soft);vertical-align:top}
+.pz-t td.num{text-align:right;white-space:nowrap;padding-left:12px;font-variant-numeric:tabular-nums}
+.pz-t .pz-soma td{font-weight:600;border-bottom:0}
+.pz-ref{margin:6px 0 0}
+.sugbox details summary,.pz details summary{cursor:pointer;color:var(--muted);margin-top:4px}
+.segue{display:flex;flex-direction:column;gap:14px;max-width:760px;width:100%;margin:0 auto}
+.seg-top{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.seg-nome{margin:0;font-size:20px}
+.seg-prog{display:flex;align-items:center;gap:10px;margin-top:6px}
+.seg-prog .bar{flex:1}
+.seg-atual{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:24px 20px;min-height:220px;display:flex;flex-direction:column;justify-content:center;gap:14px;cursor:pointer;box-shadow:var(--shadow);user-select:none;-webkit-user-select:none;-webkit-tap-highlight-color:transparent;outline:none}
+.seg-atual:active{background:var(--subtle)}
+.seg-atual:focus-visible{border-color:var(--blue)}
+.seg-atual.nota{border-style:dashed}
+.seg-rot{font-size:30px;font-weight:700;color:var(--accent-fg);display:flex;align-items:center;gap:8px 12px;flex-wrap:wrap;line-height:1.2}
+.seg-rot small{font-size:14px;color:var(--muted);font-weight:500}
+.seg-rot.nota{font-size:14px;color:var(--muted);font-weight:600}
+.seg-txt{font-size:clamp(20px,5.4vw,30px);line-height:1.4;overflow-wrap:anywhere}
+.seg-partes{display:flex;flex-wrap:wrap;gap:8px}
+.seg-pt{font-size:clamp(18px,4.8vw,26px);padding:6px 12px;border-radius:8px;border:1px solid var(--line)}
+.seg-pt.on{background:var(--accent-soft);border-color:var(--accent-fg);font-weight:700}
+.seg-pt.ok{opacity:.45;text-decoration:line-through}
+.seg-dps{margin:0}
+.seg-btns{display:grid;grid-template-columns:1fr 2fr;gap:10px}
+.seg-btns .btn{padding:14px;font-size:16px}
+.seg-opc{display:flex;flex-direction:column;gap:8px}
+.seg-lista{gap:0}
+.seg-sec{font-size:12px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);margin:14px 0 4px}
+.seg-sec:first-child{margin-top:0}
+.seg-li{padding:8px 10px;border-radius:6px;cursor:pointer;border-left:3px solid transparent}
+.seg-li:hover{background:var(--subtle)}
+.seg-li.ok{color:var(--muted)}
+.seg-li.on{background:var(--accent-soft);border-left-color:var(--accent-fg)}
+.seg-li.nota{font-style:italic}
+.bola{display:inline-block;width:.75em;height:.75em;border-radius:50%;border:1px solid var(--line);margin-right:.3em;vertical-align:-.04em}
+.tm-rec{width:min(520px,100%);text-align:left;gap:8px}
+.tm-rec-txt{font-size:17px;line-height:1.45}
+.tm-rec-btns{display:grid;grid-template-columns:auto 1fr auto;gap:8px}
 @media (max-width:640px){
   .acoes{grid-template-columns:1fr 1fr}
   .acao.pri{grid-column:span 2}
@@ -250,6 +295,17 @@ label.btn{display:inline-block}
 <div id="toast" role="status" aria-live="polite"></div>
 <input type="file" id="arquivoBackup" accept=".json,application/json" hidden>
 <script type="module" src="app.js"></script>
-<script>if('serviceWorker' in navigator)addEventListener('load',()=>navigator.serviceWorker.register('sw.js').catch(()=>{}));</script>
+<script>
+if ('serviceWorker' in navigator) addEventListener('load', () => {
+  // Quando sai versão nova (o V do sw.js muda), o sw.js novo assume e o app recarrega sozinho (ver atelieAtualizou no app.js).
+  const sw = navigator.serviceWorker, tinha = !!sw.controller;
+  sw.register('sw.js').then(r => {
+    const ver = () => r.update().catch(() => {});
+    document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') ver(); });
+    setInterval(ver, 15 * 60e3);
+  }).catch(() => {});
+  sw.addEventListener('controllerchange', () => { if (tinha && window.atelieAtualizou) atelieAtualizou(); });
+});
+</script>
 </body>
 </html>
