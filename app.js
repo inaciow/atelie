@@ -1,7 +1,24 @@
 import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js';
-import { getAuth, GoogleAuthProvider, signInWithPopup, signInWithRedirect, getRedirectResult, onAuthStateChanged, signOut } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js';
+import { getAuth, GoogleAuthProvider, signInWithPopup, signInWithRedirect, getRedirectResult, signInWithCredential, onAuthStateChanged, signOut } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js';
 import { initializeFirestore, persistentLocalCache, persistentMultipleTabManager, collection, doc, onSnapshot, setDoc, updateDoc, deleteDoc, writeBatch } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js';
 import { cfg } from './cfg.js';
+
+// App Android (pasta android/): o objeto AtelieAndroid só existe dentro dele.
+const AND = window.AtelieAndroid || null;
+const andMsg = (t, d) => { try { AND.postMessage(JSON.stringify({t, ...d})); } catch {} };
+window.atelieDoAndroid = m => {
+  if (m.t === 'token') signInWithCredential(S.auth, GoogleAuthProvider.credential(m.idToken)).catch(e => toast('Não deu pra entrar: ' + (e.code || e.message), true));
+  else if (m.t === 'erro') toast(m.msg, true);
+};
+window.atelieVoltar = () => { if (!$('#modal').hidden) { fecharModal(); return true; } return false; };
+let andTm = null;
+function andTimer() {
+  if (!AND) return;
+  const p = S.user && rodando() ? ped(S.timer.pedidoId) : null;
+  const k = p ? [p.id, p.nome, S.timer.inicio, feitas(p)].join('|') : '';
+  if (k === andTm) return; andTm = k;
+  andMsg('timer', p ? {nome: p.nome, base: Math.round(Date.now() - segTotal(p) * 1000)} : {nome: ''});
+}
 
 const TIPOS = ['Receita pronta','Custom simples','Custom médio','Custom complexo','Acessório'];
 const TIPO_CLS = {'Receita pronta':'t-pronta','Custom simples':'t-simples','Custom médio':'t-medio','Custom complexo':'t-complexo','Acessório':'t-acessorio'};
@@ -435,8 +452,9 @@ setInterval(() => {
   document.querySelectorAll('[data-clk="sess"]').forEach(e => e.textContent = fT(segAtual()));
   const bar = $('#tmBar'); if (bar && p.horasEst > 0) bar.style.width = Math.min(100, tot / 36 / p.horasEst) + '%';
 }, 500);
-let wl = null;
+let wl = null, telaAnd = null;
 async function tela(on) {
+  if (AND) { if (on !== telaAnd) { telaAnd = on; andMsg('tela', {on}); } return; }
   try {
     if (on && !wl && 'wakeLock' in navigator && document.visibilityState === 'visible') { wl = await navigator.wakeLock.request('screen'); wl.addEventListener('release', () => { wl = null; }); }
     else if (!on && wl) { const w = wl; wl = null; await w.release(); }
@@ -605,8 +623,9 @@ function vConfig() {
     ${campo('metaNatal', 'Meta do Natal (R$)', numInp('metaNatal', cf.metaNatal))}
   </div><p class="hint">Miudezas são olhinhos, fibra e botões: entram no custo de todo boneco (acessório não).</p>
   <div><button class="btn pri" type="submit">Salvar config</button></div></form>
-  <section class="card"><h2>Instalar como app</h2>${S.inst ? '<div><button class="btn pri" data-a="instalar">Instalar app</button></div>' : ''}
-    <p class="hint">${matchMedia('(display-mode: standalone)').matches ? 'Você já está usando o app instalado.' : 'Android (Chrome): menu ⋮ > <b>Instalar app</b>. iPhone (Safari): botão Compartilhar > <b>Adicionar à Tela de Início</b>. PC (Chrome ou Edge): ícone de instalar na barra de endereço.'}</p></section>
+  <section class="card"><h2>Instalar como app</h2>${AND ? '<p class="hint">Você está usando o app Android.</p>' : `${S.inst ? '<div><button class="btn pri" data-a="instalar">Instalar app</button></div>' : ''}
+    <p class="hint">${matchMedia('(display-mode: standalone)').matches ? 'Você já está usando o app instalado.' : 'iPhone (Safari): botão Compartilhar > <b>Adicionar à Tela de Início</b>. PC (Chrome ou Edge): ícone de instalar na barra de endereço.'}</p>
+    <p class="hint">Android: baixa o <b>atelie.apk</b> da <a href="https://github.com/inaciow/atelie/releases/latest">última versão</a> e instala (dá pra deixar o Obtainium atualizando sozinho).</p>`}</section>
   <section class="card"><h2>Seus dados</h2>
     <p class="hint">Os dados ficam no seu Firebase e numa cópia neste aparelho, então o app funciona sem internet e sincroniza quando ela volta. Mudar o app não apaga nada daqui. Excluir manda pra Lixeira, e dá pra voltar.</p>
     <div class="ped-acts"><button class="btn" data-a="planilha">Baixar planilha (.xlsx)</button><button class="btn" data-a="backup">Baixar backup (.json)</button><button class="btn" data-a="restaurar">Importar backup</button></div>
@@ -639,7 +658,7 @@ function renderNav() {
 function render() {
   const ae = document.activeElement;
   if (!$('#modal').hidden || (ae && $('#app').contains(ae) && /INPUT|SELECT|TEXTAREA/.test(ae.tagName) && ['config', 'calculadora'].includes(S.view))) { S.adiado = true; renderNav(); renderTimer(); return; }
-  S.adiado = false; renderNav(); renderTimer();
+  S.adiado = false; renderNav(); renderTimer(); andTimer();
   const m = $('#app');
   if (S.setup) { m.innerHTML = vSetup(); return; }
   if (S.user === null) { m.innerHTML = '<div class="empty">Carregando…</div>'; return; }
@@ -648,7 +667,7 @@ function render() {
   tela(S.view === 'timer' && rodando());
 }
 let rq = false;
-function agenda() { if (rq) return; rq = true; requestAnimationFrame(() => { rq = false; render(); }); }
+function agenda() { andTimer(); if (rq) return; rq = true; requestAnimationFrame(() => { rq = false; render(); }); }
 function rota() { const h = (location.hash || '').slice(1); S.view = VIEW_FN[h] ? h : (rodando() ? 'timer' : 'painel'); if (S.view !== 'timer') S.tp = null; render(); window.scrollTo(0, 0); }
 addEventListener('hashchange', rota);
 addEventListener('online', agenda);
@@ -661,6 +680,7 @@ async function mover(id, dir) {
   mudar('pedidos', at[i].id, {ordem: b}); mudar('pedidos', at[j].id, {ordem: a});
 }
 async function entrar() {
+  if (AND) { andMsg('entrar'); return; }
   const prov = new GoogleAuthProvider();
   try { await signInWithPopup(S.auth, prov); }
   catch (e) {
@@ -695,7 +715,7 @@ document.addEventListener('click', e => {
     backup, planilha, restaurar: () => $('#arquivoBackup').click()
   }[a] || (() => {}))();
 });
-$('#sair').addEventListener('click', () => confirmar('Sair da conta?', 'Neste aparelho você vai precisar entrar de novo, com internet.', 'Sair', () => signOut(S.auth)));
+$('#sair').addEventListener('click', () => confirmar('Sair da conta?', 'Neste aparelho você vai precisar entrar de novo, com internet.', 'Sair', () => { if (AND) andMsg('sair'); signOut(S.auth); }));
 document.addEventListener('keydown', e => {
   if (e.key === 'Escape' && !$('#modal').hidden) fecharModal();
   if (e.key === 'Enter' && e.target.matches('h3[data-a]')) e.target.click();
@@ -745,6 +765,7 @@ addEventListener('beforeinstallprompt', e => { e.preventDefault(); S.inst = e; a
 addEventListener('appinstalled', () => { S.inst = null; toast('App instalado'); agenda(); });
 
 function baixar(nome, data, tipo) {
+  if (AND) { const fr = new FileReader(); fr.onload = () => andMsg('salvar', {nome, tipo, b64: String(fr.result).split(',')[1] || ''}); fr.readAsDataURL(new Blob([data], {type: tipo})); return; }
   const url = URL.createObjectURL(new Blob([data], {type: tipo}));
   const a = document.createElement('a'); a.href = url; a.download = nome; document.body.appendChild(a); a.click(); a.remove();
   setTimeout(() => URL.revokeObjectURL(url), 4000);

@@ -1,0 +1,71 @@
+# Compila o app Android (pasta android/).
+# Na main, com os segredos APK_KEYSTORE e APK_SENHA, publica o APK assinado numa Release.
+# Sem os segredos, gera só um APK de teste (debug) nos artefatos da execução.
+name: APK Android
+
+on:
+  push:
+    paths:
+      - 'android/**'
+      - '.github/workflows/apk.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: apk-${{ github.ref }}
+
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: gradle
+
+      - name: Chave de assinatura
+        id: chave
+        env:
+          APK_KEYSTORE: ${{ secrets.APK_KEYSTORE }}
+        run: |
+          if [ -n "$APK_KEYSTORE" ]; then
+            echo "$APK_KEYSTORE" | base64 -d > "$RUNNER_TEMP/atelie.p12"
+            echo "arquivo=$RUNNER_TEMP/atelie.p12" >> "$GITHUB_OUTPUT"
+          else
+            echo "::warning::Sem o segredo APK_KEYSTORE: gerando só o APK de teste (debug)."
+          fi
+
+      - name: Compila
+        working-directory: android
+        env:
+          APK_KEYSTORE_ARQUIVO: ${{ steps.chave.outputs.arquivo }}
+          APK_SENHA: ${{ secrets.APK_SENHA }}
+        run: |
+          chmod +x gradlew
+          if [ -n "$APK_KEYSTORE_ARQUIVO" ]; then
+            ./gradlew --no-daemon assembleRelease -PversionCode=${{ github.run_number }}
+            cp app/build/outputs/apk/release/app-release.apk ../atelie.apk
+          else
+            ./gradlew --no-daemon assembleDebug -PversionCode=${{ github.run_number }}
+            cp app/build/outputs/apk/debug/app-debug.apk ../atelie-teste.apk
+          fi
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: atelie-apk
+          path: atelie*.apk
+
+      - name: Publica na Release
+        if: github.ref == 'refs/heads/main' && steps.chave.outputs.arquivo != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "v1.${{ github.run_number }}" atelie.apk \
+            --target "${{ github.sha }}" \
+            --title "Ateliê 1.${{ github.run_number }}" \
+            --notes "App Android do Ateliê. Instala por cima do anterior; os dados ficam no Firebase."

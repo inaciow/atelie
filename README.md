@@ -19,6 +19,35 @@ O `firebaseConfig` não é segredo: quem protege os dados são as regras do pass
 
 Settings > Pages > Source: **Deploy from a branch** > Branch: `main` / `(root)` > Save. O app fica em https://inaciow.github.io/atelie/
 
+## App Android (pasta `android/`)
+
+O APK é uma casca nativa em volta do site: ele abre https://inaciow.github.io/atelie/ numa WebView, então push na `main` continua atualizando o app sem APK novo. O lado nativo (`MainActivity.kt`) cuida do que a WebView não faz sozinha:
+
+- **login nativo do Google** (Credential Manager): o Google devolve um ID token e o site entra no Firebase com `signInWithCredential`, na mesma conta (mesmo uid) do login pelo navegador;
+- **backup e planilha** vão pra pasta Downloads;
+- **tela acesa** no timer e **timer na notificação**, contando mesmo com o app fechado;
+- barras do sistema e ícone (adaptativo e monocromático) certos.
+
+O site fala com o app pelo objeto `AtelieAndroid` (mensagens JSON: `entrar`, `sair`, `salvar`, `tela`, `timer`) e recebe respostas em `window.atelieDoAndroid`. No navegador esse objeto não existe e nada muda.
+
+**Como o APK é feito:** o workflow `.github/workflows/apk.yml` compila quando muda algo em `android/`, e também pode ser rodado na mão (Actions > APK Android > Run workflow). Na `main`, com os segredos abaixo, ele publica o `atelie.apk` assinado numa Release nova. Sem os segredos, gera só um APK de teste nos artefatos.
+
+**Configurar uma vez:**
+
+1. GitHub > Settings > Secrets and variables > Actions > New repository secret:
+   - `APK_KEYSTORE`: a chave de assinatura (arquivo `.p12` em base64);
+   - `APK_SENHA`: a senha da chave.
+
+   Guarda uma cópia da chave e da senha fora do GitHub. Sem elas não dá pra atualizar o app instalado: teria que desinstalar e instalar de novo (os dados ficam no Firebase, só o que estiver esperando internet no aparelho se perde).
+2. Firebase > Configurações do projeto > Seus apps > Adicionar app > **Android**:
+   - nome do pacote `io.github.inaciow.atelie`;
+   - **SHA-1** da chave (`keytool -list -v -keystore atelie.p12`).
+
+   Sem isso o login nativo do Google falha. Não precisa baixar o `google-services.json`.
+3. Actions > APK Android > Run workflow (na `main`). O APK sai em Releases.
+
+No celular, o Obtainium pode acompanhar as Releases do repositório e atualizar sozinho.
+
 ## Trazer os dados do app antigo
 
 No app antigo do Claude: Config > Baixar backup (.json). No app novo: Config > Importar backup.

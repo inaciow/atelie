@@ -1,4 +1,4 @@
-const V = 'atelie-7';
+const V = 'atelie-8';
 const BASE = ['./', 'index.html', 'app.js', 'cfg.js', 'manifest.webmanifest', 'icon-192.png', 'icon-512.png', 'apple-touch-icon.png', 'icon-maskable-512.png', 'icon-mono-512.png'];
 const EXT = /^https:\/\/(www\.gstatic\.com\/firebasejs\/|cdnjs\.cloudflare\.com\/|fonts\.googleapis\.com\/|fonts\.gstatic\.com\/)/;
 
