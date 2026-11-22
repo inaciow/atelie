@@ -32,10 +32,10 @@ Tudo fica em `users/<seu uid>/` no Firestore:
 | `pedidos/<id>` | nome, cliente, contato, tipo, status, prazo, horasEst, preco, sinal, pago, ordem, pedidoEm, entregueEm, lixo |
 | `horas/<id>` | pedidoId, data, horas, inicio, fim, lixo |
 | `compras/<id>` | item, tipo, cor, qtd, precoUn, pedidoId (vazio = estoque), onde, comprado, compradoEm, lixo |
-| `estoque/<id>` | cor, situacao, ordem, lixo |
+| `estoque/<id>` | cor, situacao, ordem, hex (cor de verdade, ex. `#c0392b`), lixo |
 | `receitas/<id>` | personagem, fonte, autor, altura, arquivo, lixo |
 | `meta/config` | valorHora, precoNovelo, miudezas, descontoFamilia, metaNatal |
-| `meta/timer` | pedidoId, inicio |
+| `meta/timer` | pedidoId, inicio (timer rodando; cada pausa vira uma sessão em `horas`) |
 
 ## Regras pra mexer no app sem estragar os dados
 

@@ -14,10 +14,10 @@ const TIPOS_COMPRA = ['Novelo','Linha de bordado','Olhinhos','Fibra','Botão','S
 const FONTES = ['Própria','A criar','Comprada','Grátis'];
 const COLS = ['pedidos','horas','compras','estoque','receitas'];
 const DEF_CFG = {valorHora:13, precoNovelo:20, miudezas:8, descontoFamilia:0.1, metaNatal:null};
-const VIEWS = [['painel','Painel'],['fila','Fila'],['horas','Horas'],['compras','Compras'],['estoque','Estoque'],['calculadora','Calculadora'],['receitas','Receitas'],['config','Config']];
+const VIEWS = [['timer','Timer'],['painel','Painel'],['fila','Fila'],['horas','Horas'],['compras','Compras'],['estoque','Estoque'],['calculadora','Calculadora'],['receitas','Receitas'],['config','Config']];
 
 const S = {pedidos:[],horas:[],compras:[],estoque:[],receitas:[],raw:{},config:{...DEF_CFG},rawCfg:null,timer:null,
-  ok:{},pend:{},user:null,fs:null,setup:false,view:'painel',verSaiu:false,verComprados:false,adiado:false,
+  ok:{},pend:{},user:null,tp:null,inst:null,fs:null,setup:false,view:'painel',verSaiu:false,verComprados:false,adiado:false,
   calc:{horas:10,novelos:0,outros:0}};
 
 const $ = s => document.querySelector(s);
@@ -39,6 +39,11 @@ const r90 = v => Math.max(9.9, Math.round((Math.ceil(v / 10 - 1e-9) * 10 - 0.1) 
 const plural = (n, a, b) => n === 1 ? a : b;
 const opts = (arr, sel) => arr.map(o => `<option${o === sel ? ' selected' : ''}>${esc(o)}</option>`).join('');
 const agora = () => new Date().toISOString();
+const fT = sec => { sec = Math.max(0, Math.floor(sec)); return Math.floor(sec / 3600) + ':' + pad(Math.floor(sec % 3600 / 60)) + ':' + pad(sec % 60); };
+const semAcento = v => str(v).normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim();
+const rodando = () => !!(S.timer && S.timer.inicio && S.timer.pedidoId);
+const segAtual = () => rodando() ? (Date.now() - new Date(S.timer.inicio)) / 1000 : 0;
+const segTotal = p => feitas(p) * 3600 + (rodando() && S.timer.pedidoId === p.id ? segAtual() : 0);
 
 const NORM = {
   pedidos: (id, d) => ({id, nome: str(d.nome) || '(sem nome)', cliente: str(d.cliente), tipo: TIPOS.includes(d.tipo) ? d.tipo : 'Custom simples',
@@ -49,7 +54,7 @@ const NORM = {
   compras: (id, d) => ({id, item: str(d.item) || '(sem nome)', tipo: TIPOS_COMPRA.includes(d.tipo) ? d.tipo : 'Outro', cor: str(d.cor),
     qtd: num(d.qtd, 1), precoUn: num(d.precoUn, 0), onde: str(d.onde), pedidoId: str(d.pedidoId), comprado: d.comprado === true,
     compradoEm: str(d.compradoEm), criadoEm: str(d.criadoEm), lixo: d.lixo === true}),
-  estoque: (id, d) => ({id, cor: str(d.cor) || '(sem nome)', situacao: SIT.includes(d.situacao) ? d.situacao : 'Tem', ordem: num(d.ordem, 1e6), lixo: d.lixo === true}),
+  estoque: (id, d) => ({id, cor: str(d.cor) || '(sem nome)', situacao: SIT.includes(d.situacao) ? d.situacao : 'Tem', ordem: num(d.ordem, 1e6), hex: /^#[0-9a-f]{6}$/i.test(str(d.hex)) ? str(d.hex).toLowerCase() : '', lixo: d.lixo === true}),
   receitas: (id, d) => ({id, personagem: str(d.personagem) || '(sem nome)', fonte: FONTES.includes(d.fonte) ? d.fonte : 'Própria', autor: str(d.autor),
     altura: num(d.altura), arquivo: str(d.arquivo), lixo: d.lixo === true})
 };
@@ -197,8 +202,8 @@ function formHoras(pid, hid) {
     ${campo('fim', 'Fim', inp('fim', h?.fim, 'type="time"'))}
   </div>`;
   const extra = h ? `<button type="button" class="btn bad" data-a="excluir" data-col="horas" data-id="${esc(h.id)}">Excluir</button>`
-    : (!S.timer?.inicio ? `<button type="button" class="btn" data-a="timerDoModal">Começar cronômetro</button>` : '');
-  abrirModal(h ? 'Editar horas' : 'Lançar horas', corpo, {extra, salvarTxt: h ? 'Salvar' : 'Lançar',
+    : '';
+  abrirModal(h ? 'Editar sessão' : 'Sessão esquecida', corpo, {extra, salvarTxt: h ? 'Salvar' : 'Lançar',
     onOk: d => {
       if (!d.pedidoId) { erroModal('Escolhe a peça.'); return false; }
       let horas = num(d.horas);
@@ -233,13 +238,43 @@ function formCompra(cid, pre = {}) {
 }
 function formCor(eid) {
   const e = eid ? S.estoque.find(x => x.id === eid) : null;
-  const corpo = `${campo('cor', 'Cor', inp('cor', e?.cor, 'required autocomplete="off"'))}${campo('situacao', 'Situação', sel('situacao', SIT, e?.situacao || 'Tem'))}`;
+  const hx = e?.hex || '';
+  const corpo = `${campo('cor', 'Cor', inp('cor', e?.cor, 'required autocomplete="off"'))}${campo('situacao', 'Situação', sel('situacao', SIT, e?.situacao || 'Tem'))}
+    <div class="field"><label>Cor de verdade</label><div class="corbox"><span class="sw big" id="hexSw" style="${hx ? 'background:' + hx : ''}"></span><code id="hexTxt">${hx || 'sem cor'}</code>
+      <input type="hidden" name="hex" id="hex" value="${esc(hx)}"><span class="sp"></span>
+      <label class="btn sm" for="fotoCor">Tirar foto</label><input type="file" id="fotoCor" accept="image/*" hidden>
+      <label class="btn sm" for="hexPick">Escolher</label><input type="color" id="hexPick" value="${hx || '#888888'}" class="vh">
+      ${hx ? '<button type="button" class="btn sm" data-a="corLimpar">Limpar</button>' : ''}</div>
+      <p class="hint">Tira uma foto de perto do novelo: o app pega a cor do meio da foto.</p></div>`;
   const extra = e ? `<button type="button" class="btn bad" data-a="excluir" data-col="estoque" data-id="${esc(e.id)}">Excluir</button>` : '';
   abrirModal(e ? 'Editar cor' : 'Nova cor no estoque', corpo, {extra, onOk: d => {
     if (!d.cor.trim()) { erroModal('Diz a cor.'); return false; }
-    if (e) mudar('estoque', e.id, {cor: d.cor.trim(), situacao: d.situacao}, 'Cor salva');
-    else { const mx = Math.max(0, ...vivos('estoque').map(x => x.ordem).filter(x => x < 1e6)); criar('estoque', {cor: d.cor.trim(), situacao: d.situacao, ordem: mx + 1, lixo: false}, 'Cor adicionada'); }
+    const patch = {cor: d.cor.trim(), situacao: d.situacao, hex: d.hex || ''};
+    if (e) mudar('estoque', e.id, patch, 'Cor salva');
+    else { const mx = Math.max(0, ...vivos('estoque').map(x => x.ordem).filter(x => x < 1e6)); criar('estoque', {...patch, ordem: mx + 1, lixo: false}, 'Cor adicionada'); }
   }});
+}
+function setHex(h) {
+  const i = $('#hex'); if (!i) return;
+  i.value = h; $('#hexTxt').textContent = h || 'sem cor'; $('#hexSw').style.background = h || '';
+}
+async function corDaFoto(file) {
+  const bmp = await createImageBitmap(file), n = 64, cv = document.createElement('canvas'); cv.width = cv.height = n;
+  const g = cv.getContext('2d', {willReadFrequently: true}), k = Math.min(bmp.width, bmp.height) * 0.35;
+  g.drawImage(bmp, (bmp.width - k) / 2, (bmp.height - k) / 2, k, k, 0, 0, n, n);
+  const d = g.getImageData(0, 0, n, n).data, px = [];
+  for (let i = 0; i < d.length; i += 4) px.push([d[i], d[i + 1], d[i + 2], 0.2126 * d[i] + 0.7152 * d[i + 1] + 0.0722 * d[i + 2]]);
+  px.sort((x, y) => x[3] - y[3]);
+  let R = 0, G = 0, B = 0, c = 0;
+  for (let i = Math.floor(px.length * 0.15); i < Math.ceil(px.length * 0.85); i++) { R += px[i][0]; G += px[i][1]; B += px[i][2]; c++; }
+  return '#' + [R, G, B].map(v => Math.round(v / c).toString(16).padStart(2, '0')).join('');
+}
+function hsl(hex) {
+  const [r, g, b] = [1, 3, 5].map(i => parseInt(hex.slice(i, i + 2), 16) / 255), mx = Math.max(r, g, b), mn = Math.min(r, g, b), l = (mx + mn) / 2, dd = mx - mn;
+  if (!dd) return [0, 0, l];
+  const sat = dd / (1 - Math.abs(2 * l - 1));
+  const h = mx === r ? ((g - b) / dd + 6) % 6 : mx === g ? (b - r) / dd + 2 : (r - g) / dd + 4;
+  return [h * 60, sat, l];
 }
 function formReceita(rid) {
   const r = rid ? S.receitas.find(x => x.id === rid) : null;
@@ -254,29 +289,86 @@ function formReceita(rid) {
   }});
 }
 
-function timerStart(pid) {
-  if (!pid) { toast('Escolhe a peça primeiro.', true); return; }
-  mudarMeta('timer', {pedidoId: pid, inicio: agora()}, 'Cronômetro rodando: ' + nomePed(pid));
-}
-function timerStop(lancar) {
-  const t = S.timer; if (!t || !t.inicio) return;
-  const ini = new Date(t.inicio), fim = new Date();
-  const horas = Math.round((fim - ini) / 36e5 * 100) / 100;
-  if (lancar && horas >= 0.01) {
+function salvaSessao() {
+  const t = S.timer; if (!rodando()) return;
+  const ini = new Date(t.inicio), fim = new Date(), seg = (fim - ini) / 1000;
+  if (seg >= 10) {
     const hm = d => pad(d.getHours()) + ':' + pad(d.getMinutes());
-    criar('horas', {pedidoId: t.pedidoId, data: isoDia(ini), horas, inicio: hm(ini), fim: hm(fim), lixo: false}, fH(horas) + ' em ' + nomePed(t.pedidoId));
+    criar('horas', {pedidoId: t.pedidoId, data: isoDia(ini), horas: Math.round(seg / 36) / 100, inicio: hm(ini), fim: hm(fim), lixo: false});
   }
-  mudarMeta('timer', {pedidoId: null, inicio: null}, lancar ? '' : 'Cronômetro descartado');
 }
-function decorrido(iso) { const m = Math.max(0, Math.floor((Date.now() - new Date(iso)) / 6e4)); return (m >= 60 ? Math.floor(m / 60) + 'h ' : '') + pad(m % 60) + 'min'; }
+function timerStart(pid) {
+  if (!pid) return;
+  if (rodando()) { if (S.timer.pedidoId === pid) return; salvaSessao(); }
+  const p = ped(pid);
+  if (p && ['Na fila', 'Esperando fio'].includes(p.status)) mudar('pedidos', pid, {status: 'Fazendo'});
+  S.timer = {pedidoId: pid, inicio: agora()};
+  mudarMeta('timer', {...S.timer});
+  agenda();
+}
+function timerPausa() {
+  if (!rodando()) return;
+  salvaSessao();
+  S.timer = {pedidoId: null, inicio: null};
+  mudarMeta('timer', {...S.timer});
+  agenda();
+}
+function terminei(pid) {
+  const p = ped(pid); if (!p) return;
+  confirmar('Terminou ' + p.nome + '?', `Vai ficar como <b>Pronto</b> com ${fT(segTotal(p))} de trabalho. Dá pra mudar o status depois na Fila.`, 'Terminei', () => {
+    if (rodando() && S.timer.pedidoId === pid) timerPausa();
+    mudar('pedidos', pid, {status: 'Pronto'}, p.nome + ' pronto!');
+    S.tp = null; agenda();
+  });
+}
 function renderTimer() {
-  const b = $('#timerbar'), t = S.timer;
-  if (!S.user || !t || !t.inicio || !t.pedidoId) { b.hidden = true; b.innerHTML = ''; return; }
+  const b = $('#timerbar');
+  if (!S.user || !rodando() || S.view === 'timer') { b.hidden = true; b.innerHTML = ''; return; }
+  const p = ped(S.timer.pedidoId);
   b.hidden = false;
-  b.innerHTML = `<div class="in"><span>Cronômetro: <b>${esc(nomePed(t.pedidoId))}</b> há <b id="tdec">${decorrido(t.inicio)}</b></span><span class="sp"></span>
-    <button data-a="timerStop">Parar e lançar</button><button class="ghost" data-a="timerCancel">Descartar</button></div>`;
+  b.innerHTML = `<div class="in"><span>Rodando: <b>${esc(nomePed(S.timer.pedidoId))}</b> <b class="num" data-clk="total">${p ? fT(segTotal(p)) : ''}</b></span><span class="sp"></span>
+    <button class="ghost" data-a="nav" data-v="timer">Abrir timer</button><button data-a="tmPausa">Pausar</button></div>`;
 }
-setInterval(() => { const e = $('#tdec'); if (e && S.timer?.inicio) e.textContent = decorrido(S.timer.inicio); }, 20000);
+setInterval(() => {
+  if (!rodando()) return;
+  const p = ped(S.timer.pedidoId); if (!p) return;
+  const tot = segTotal(p);
+  document.querySelectorAll('[data-clk="total"]').forEach(e => e.textContent = fT(tot));
+  document.querySelectorAll('[data-clk="sess"]').forEach(e => e.textContent = fT(segAtual()));
+  const bar = $('#tmBar'); if (bar && p.horasEst > 0) bar.style.width = Math.min(100, tot / 36 / p.horasEst) + '%';
+}, 500);
+let wl = null;
+async function tela(on) {
+  try {
+    if (on && !wl && 'wakeLock' in navigator && document.visibilityState === 'visible') { wl = await navigator.wakeLock.request('screen'); wl.addEventListener('release', () => { wl = null; }); }
+    else if (!on && wl) { const w = wl; wl = null; await w.release(); }
+  } catch {}
+}
+document.addEventListener('visibilitychange', () => tela(S.view === 'timer' && rodando()));
+
+function vTimer() {
+  const run = rodando();
+  const pid = S.tp === 'escolher' ? null : (S.tp || (run ? S.timer.pedidoId : null));
+  const p = pid ? ped(pid) : null;
+  if (!p) {
+    const at = ativosOrd().filter(x => x.status !== 'Pronto');
+    return `<div class="tm-pick"><h2>Em qual peça você vai trabalhar?</h2>
+      <div class="lista">${at.length ? at.map(x => `<button class="tm-item" data-a="tmEscolher" data-id="${esc(x.id)}"><span class="grow"><b>${esc(x.nome)}</b><span class="small muted">${esc(x.status)}${x.horasEst ? ' · estimado ' + fH(x.horasEst) : ''}</span></span>
+        <span class="num tm-t" ${run && S.timer.pedidoId === x.id ? 'data-clk="total"' : ''}>${fT(segTotal(x))}</span>${run && S.timer.pedidoId === x.id ? '<span class="pill t-pronta">rodando</span>' : ''}</button>`).join('') : '<div class="empty">Nenhuma peça na fila. Cria um pedido primeiro.</div>'}</div></div>`;
+  }
+  const aqui = run && S.timer.pedidoId === p.id, outro = run && !aqui;
+  const tot = segTotal(p);
+  return `<div class="tm">
+    <div class="tm-top"><button class="btn sm" data-a="tmTrocar">‹ Trocar peça</button><span class="sp"></span><span class="pill ${TIPO_CLS[p.tipo]}">${esc(p.tipo)}</span></div>
+    <h2 class="tm-nome">${esc(p.nome)}</h2>
+    <div class="tm-clock num ${aqui ? 'on' : ''}" ${aqui ? 'data-clk="total"' : ''}>${fT(tot)}</div>
+    <div class="tm-sub">${aqui ? 'esta sessão <b class="num" data-clk="sess">' + fT(segAtual()) + '</b>' : 'pausado'}</div>
+    ${p.horasEst > 0 ? `<div class="tm-prog"><div class="bar"><i id="tmBar" style="width:${Math.min(100, tot / 36 / p.horasEst)}%"></i></div><span>estimado ${fH(p.horasEst)}</span></div>` : ''}
+    ${outro ? `<p class="aviso small">O timer está rodando em <b>${esc(nomePed(S.timer.pedidoId))}</b>. Começar aqui pausa lá e salva o tempo.</p>` : ''}
+    <button class="tm-go ${aqui ? 'on' : ''}" data-a="tmToggle" data-id="${esc(p.id)}">${aqui ? 'Pausar' : tot > 0 ? 'Continuar' : 'Começar'}</button>
+    <button class="btn tm-done" data-a="tmTerminei" data-id="${esc(p.id)}">Terminei</button>
+  </div>`;
+}
 
 function kv(linhas) { return `<dl class="kv">${linhas.map(([k, v, c]) => `<dt>${k}</dt><dd class="${c || ''}">${v}</dd>`).join('')}</dl>`; }
 function barra(frac, rot) { return `<div class="meta-bar"><div class="head small"><span>${rot}</span><span class="sp"></span><b>${frac == null ? '–' : fP(frac)}</b></div><div class="bar"><i style="width:${Math.round((frac || 0) * 100)}%"></i></div></div>`; }
@@ -292,8 +384,8 @@ function grafico() {
 function vPainel() {
   const k = kpis();
   return `<section class="acoes" aria-label="Atalhos">
-    <button class="acao pri" data-a="novoPedido">+ Pedido<span>entra na fila</span></button>
-    <button class="acao" data-a="lancarHoras">Lançar horas<span>${S.timer?.inicio ? 'cronômetro rodando' : 'ou cronometrar'}</span></button>
+    <button class="acao pri" data-a="nav" data-v="timer">Timer<span>${rodando() ? 'rodando em ' + esc(nomePed(S.timer.pedidoId)) : 'escolhe a peça e aperta'}</span></button>
+    <button class="acao" data-a="novoPedido">+ Pedido<span>entra na fila</span></button>
     <button class="acao" data-a="novaCompra">+ Compra<span>ou gasto</span></button>
     <button class="acao" data-a="nav" data-v="estoque">Estoque<span>${vivos('estoque').filter(e => ['Pouco', 'Acabou'].includes(e.situacao)).length} cores acabando</span></button>
   </section>
@@ -315,7 +407,7 @@ function cardPedido(p, pos, primeiro, ultimo) {
     <div class="ped-top">${pos ? `<span class="pos">${pos}º</span>` : ''}<h3 data-a="editPedido" data-id="${esc(p.id)}" tabindex="0">${esc(p.nome)}</h3>
       <select class="status ${ST_CLS[p.status]}" data-c="status" data-id="${esc(p.id)}" aria-label="Status de ${esc(p.nome)}">${opts(STATUS, p.status)}</select></div>
     <div class="ped-meta"><span class="pill ${TIPO_CLS[p.tipo]}">${esc(p.tipo)}</span>${p.cliente ? `<span>${esc(p.cliente)}</span>` : ''}${p.contato ? `<span>${esc(p.contato)}</span>` : ''}${prazo}</div>
-    <div class="prog"><div class="bar"><i style="width:${Math.round(c.pct * 100)}%"></i></div><span class="num">${fN(c.f)} de ${fH(p.horasEst)}${c.restam > 0 ? ' · faltam ' + fH(c.restam) : ''}</span></div>
+    <div class="prog"><div class="bar"><i style="width:${Math.round(c.pct * 100)}%"></i></div><span class="num">${fH(c.f)} de ${fH(p.horasEst)}${c.restam > 0 ? ' · faltam ' + fH(c.restam) : ''}</span></div>
     <div class="nums">
       <div><small>Preço</small><b>${p.preco == null ? 'a definir' : fR(p.preco)}</b></div>
       <div class="sug"><small>Sugerido</small><b>${fR(c.sug)}</b></div>
@@ -326,8 +418,7 @@ function cardPedido(p, pos, primeiro, ultimo) {
     </div>
     <div class="ped-acts">
       <label class="chk"><input type="checkbox" data-c="pago" data-id="${esc(p.id)}" ${p.pago ? 'checked' : ''}> Pago</label>
-      <button class="btn sm" data-a="lancarHoras" data-id="${esc(p.id)}">+ Horas</button>
-      ${S.timer?.inicio ? '' : `<button class="btn sm" data-a="timerStart" data-id="${esc(p.id)}">Começar cronômetro</button>`}
+      ${saiu ? '' : `<button class="btn sm ${rodando() && S.timer.pedidoId === p.id ? 'pri' : ''}" data-a="tmAbrir" data-id="${esc(p.id)}">Timer <span class="num" ${rodando() && S.timer.pedidoId === p.id ? 'data-clk="total"' : ''}>${fT(segTotal(p))}</span></button>`}
       <span class="sp"></span>
       ${pos ? `<button class="icon" data-a="subir" data-id="${esc(p.id)}" aria-label="Subir ${esc(p.nome)} na fila" ${primeiro ? 'disabled' : ''}>↑</button><button class="icon" data-a="descer" data-id="${esc(p.id)}" aria-label="Descer ${esc(p.nome)} na fila" ${ultimo ? 'disabled' : ''}>↓</button>` : ''}
       <button class="btn sm" data-a="editPedido" data-id="${esc(p.id)}">Editar</button>
@@ -344,7 +435,8 @@ function vHoras() {
   const k = kpis(); const porDia = {};
   hs.forEach(h => (porDia[h.data] = porDia[h.data] || []).push(h));
   const dias = Object.keys(porDia).sort().reverse();
-  return `<div class="head"><h2>Horas</h2><span class="sp"></span>${S.timer?.inicio ? '' : `<button class="btn" data-a="timerDaTela">Começar cronômetro</button>`}<button class="btn pri" data-a="lancarHoras">Lançar horas</button></div>
+  return `<div class="head"><h2>Horas</h2><span class="sp"></span><button class="btn sm" data-a="lancarHoras">Sessão esquecida</button><button class="btn pri" data-a="nav" data-v="timer">Abrir timer</button></div>
+  <p class="hint">Cada vez que você pausa o timer vira uma sessão aqui. Se esqueceu o timer ligado, edita a sessão.</p>
   <div class="card">${kv([['Nesta semana', fH(k.hSemana)], ['No total', fH(k.hTotal)]])}</div>
   <div class="card">${dias.length ? dias.map(d => `<div><h3 class="small muted" style="margin:6px 0">${fData(d)} · ${fH(porDia[d].reduce((a, h) => a + h.horas, 0))}</h3>
     ${porDia[d].map(h => `<div class="row"><span class="grow"><b>${esc(nomePed(h.pedidoId))}</b>${h.inicio && h.fim ? ` <span class="muted small">${esc(h.inicio)} às ${esc(h.fim)}</span>` : ''}</span><b class="num">${fH(h.horas)}</b><button class="btn sm" data-a="editHoras" data-id="${esc(h.id)}">Editar</button></div>`).join('')}</div>`).join('') : '<div class="empty">Nenhuma hora lançada ainda.</div>'}</div>`;
@@ -358,15 +450,24 @@ function vCompras() {
   const cs = vivos('compras'), pend = cs.filter(c => !c.comprado), feitasC = cs.filter(c => c.comprado).sort((a, b) => (b.compradoEm || '').localeCompare(a.compradoEm || ''));
   const tp = pend.reduce((a, c) => a + c.qtd * c.precoUn, 0), tf = feitasC.reduce((a, c) => a + c.qtd * c.precoUn, 0);
   return `<div class="head"><h2>Compras e gastos</h2><span class="sp"></span><button class="btn pri" data-a="novaCompra">+ Compra</button></div>
-  <div class="card"><div class="head"><h3>Pra comprar</h3><span class="sp"></span><b class="num">${fR(tp)}</b></div>${pend.length ? pend.map(linhaCompra).join('') : '<p class="muted">Nada pendente.</p>'}</div>
+  <div class="card"><div class="head"><h3>Pra comprar</h3><span class="sp"></span><b class="num">${fR(tp)}</b>${pend.length > 1 ? '<button class="btn sm" data-a="comprarTudo">Comprei tudo</button>' : ''}</div>${pend.length ? pend.map(linhaCompra).join('') : '<p class="muted">Nada pendente.</p>'}</div>
   ${feitasC.length ? `<details class="card" ${S.verComprados ? 'open' : ''} data-t="verComprados"><summary>Já comprado · ${fR(tf)}</summary>${feitasC.map(linhaCompra).join('')}</details>` : ''}`;
 }
+function ordEstoque() { try { return localStorage.getItem('estoqueOrdem') || 'az'; } catch { return 'az'; } }
 function vEstoque() {
-  const es = vivos('estoque').sort((a, b) => a.ordem - b.ordem || a.cor.localeCompare(b.cor));
-  return `<div class="head"><h2>Estoque</h2><span class="sp"></span><button class="btn pri" data-a="novaCor">+ Cor</button></div>
-  <p class="hint">Toque na situação pra trocar: Cheio, Tem, Pouco, Acabou, Não tenho.</p>
-  <div class="card">${es.length ? es.map(e => `<div class="row"><span class="grow"><b data-a="editCor" data-id="${esc(e.id)}" style="cursor:pointer">${esc(e.cor)}</b></span>
-    ${['Pouco', 'Acabou', 'Não tenho'].includes(e.situacao) ? `<button class="btn sm" data-a="corNaLista" data-id="${esc(e.id)}">Pôr na lista de compras</button>` : ''}
+  const o = ordEstoque(), es = vivos('estoque');
+  if (o === 'cor') es.sort((a, b) => {
+    if (!a.hex || !b.hex) return (!a.hex) - (!b.hex) || a.cor.localeCompare(b.cor);
+    const [ha, sa, la] = hsl(a.hex), [hb, sb, lb] = hsl(b.hex), ca = sa < 0.15 || la < 0.1 || la > 0.92, cb = sb < 0.15 || lb < 0.1 || lb > 0.92;
+    return ca - cb || (ca ? lb - la : (ha - hb) || (lb - la));
+  });
+  else es.sort((a, b) => a.cor.localeCompare(b.cor, 'pt-BR'));
+  return `<div class="head"><h2>Estoque</h2><span class="sp"></span>
+    <span class="seg" role="group" aria-label="Ordenar"><button class="${o === 'az' ? 'on' : ''}" data-a="estOrdem" data-v="az">A–Z</button><button class="${o === 'cor' ? 'on' : ''}" data-a="estOrdem" data-v="cor">Por cor</button></span>
+    <button class="btn pri" data-a="novaCor">+ Cor</button></div>
+  <p class="hint">Toque na situação pra trocar. Toque no nome pra pôr a cor de verdade (dá pra tirar foto do novelo).</p>
+  <div class="card">${es.length ? es.map(e => `<div class="row"><span class="sw" style="${e.hex ? 'background:' + e.hex : ''}" title="${esc(e.hex || 'sem cor')}"></span><span class="grow"><b data-a="editCor" data-id="${esc(e.id)}" style="cursor:pointer">${esc(e.cor)}</b></span>
+    ${['Pouco', 'Acabou', 'Não tenho'].includes(e.situacao) ? `<button class="btn sm" data-a="corNaLista" data-id="${esc(e.id)}">Pôr na lista</button>` : ''}
     <button class="sit sit-${e.situacao === 'Não tenho' ? 'Nao' : e.situacao}" data-a="ciclarSit" data-id="${esc(e.id)}" aria-label="${esc(e.cor)}: ${esc(e.situacao)}. Toque pra trocar">${esc(e.situacao)}</button></div>`).join('') : '<div class="empty">Nenhuma cor ainda.</div>'}</div>`;
 }
 function vCalc() {
@@ -403,13 +504,15 @@ function vConfig() {
     ${campo('metaNatal', 'Meta do Natal (R$)', numInp('metaNatal', cf.metaNatal))}
   </div><p class="hint">Miudezas são olhinhos, fibra e botões: entram no custo de todo boneco (acessório não).</p>
   <div><button class="btn pri" type="submit">Salvar config</button></div></form>
+  <section class="card"><h2>Instalar como app</h2>${S.inst ? '<div><button class="btn pri" data-a="instalar">Instalar app</button></div>' : ''}
+    <p class="hint">${matchMedia('(display-mode: standalone)').matches ? 'Você já está usando o app instalado.' : 'Android (Chrome): menu ⋮ > <b>Instalar app</b>. iPhone (Safari): botão Compartilhar > <b>Adicionar à Tela de Início</b>. PC (Chrome ou Edge): ícone de instalar na barra de endereço.'}</p></section>
   <section class="card"><h2>Seus dados</h2>
     <p class="hint">Os dados ficam no seu Firebase e numa cópia neste aparelho, então o app funciona sem internet e sincroniza quando ela volta. Mudar o app não apaga nada daqui. Excluir manda pra Lixeira, e dá pra voltar.</p>
     <div class="ped-acts"><button class="btn" data-a="planilha">Baixar planilha (.xlsx)</button><button class="btn" data-a="backup">Baixar backup (.json)</button><button class="btn" data-a="restaurar">Importar backup</button></div>
     <p class="hint">Conta: ${esc(S.user?.email || '')}</p></section>
   <section class="card"><h2>Lixeira (${lixo.length})</h2>${lixo.length ? lixo.map(o => `<div class="row"><span class="grow">${esc(nomeLixo(o))}</span><button class="btn sm" data-a="desfazer" data-col="${o.c}" data-id="${esc(o.x.id)}">Voltar</button><button class="btn sm bad" data-a="apagar" data-col="${o.c}" data-id="${esc(o.x.id)}">Apagar de vez</button></div>`).join('') : '<p class="muted">Vazia.</p>'}</section>`;
 }
-const VIEW_FN = {painel: vPainel, fila: vFila, horas: vHoras, compras: vCompras, estoque: vEstoque, calculadora: vCalc, receitas: vReceitas, config: vConfig};
+const VIEW_FN = {timer: vTimer, painel: vPainel, fila: vFila, horas: vHoras, compras: vCompras, estoque: vEstoque, calculadora: vCalc, receitas: vReceitas, config: vConfig};
 
 function vLogin() {
   return `<div class="login"><img src="icon-192.png" alt=""><h2>Entra pra ver seus pedidos</h2>
@@ -441,10 +544,11 @@ function render() {
   if (S.user === null) { m.innerHTML = '<div class="empty">Carregando…</div>'; return; }
   if (S.user === false) { m.innerHTML = vLogin(); return; }
   m.innerHTML = VIEW_FN[S.view]();
+  tela(S.view === 'timer' && rodando());
 }
 let rq = false;
 function agenda() { if (rq) return; rq = true; requestAnimationFrame(() => { rq = false; render(); }); }
-function rota() { const h = (location.hash || '').slice(1); S.view = VIEW_FN[h] ? h : 'painel'; render(); window.scrollTo(0, 0); }
+function rota() { const h = (location.hash || '').slice(1); S.view = VIEW_FN[h] ? h : (rodando() ? 'timer' : 'painel'); if (S.view !== 'timer') S.tp = null; render(); window.scrollTo(0, 0); }
 addEventListener('hashchange', rota);
 addEventListener('online', agenda);
 addEventListener('offline', agenda);
@@ -475,9 +579,12 @@ document.addEventListener('click', e => {
     novoPedido: () => formPedido(), editPedido: () => formPedido(id), lancarHoras: () => formHoras(id), editHoras: () => formHoras(null, id),
     novaCompra: () => formCompra(), editCompra: () => formCompra(id), novaCor: () => formCor(), editCor: () => formCor(id),
     novaReceita: () => formReceita(), editReceita: () => formReceita(id),
-    timerStart: () => timerStart(id), timerStop: () => timerStop(true), timerCancel: () => confirmar('Descartar cronômetro?', 'O tempo contado até agora não vai ser lançado.', 'Descartar', () => timerStop(false)),
-    timerDoModal: () => { const f = $('#mf'); const pid = f && f.pedidoId.value; fecharModal(); timerStart(pid); },
-    timerDaTela: () => { const p = ativosOrd().find(x => x.status === 'Fazendo') || ativosOrd()[0]; abrirModal('Começar cronômetro', campo('pedidoId', 'Em qual peça', selPedido('pedidoId', p?.id, false)), {salvarTxt: 'Começar', onOk: d => { timerStart(d.pedidoId); }}); },
+    tmPausa: () => timerPausa(), tmEscolher: () => { S.tp = id; render(); }, tmTrocar: () => { S.tp = 'escolher'; render(); },
+    tmToggle: () => { if (rodando() && S.timer.pedidoId === id) timerPausa(); else timerStart(id); },
+    tmTerminei: () => terminei(id), tmAbrir: () => { S.tp = id; if (location.hash === '#timer') render(); else location.hash = 'timer'; },
+    comprarTudo: () => { const pend = vivos('compras').filter(c => !c.comprado); confirmar('Comprou tudo?', `Marca os ${pend.length} itens da lista como comprados.`, 'Comprei tudo', () => comprou(pend)); },
+    estOrdem: () => { try { localStorage.setItem('estoqueOrdem', b.dataset.v); } catch {} render(); },
+    corLimpar: () => setHex(''), instalar: async () => { const ev = S.inst; S.inst = null; if (ev) { ev.prompt(); await ev.userChoice.catch(() => {}); } render(); },
     subir: () => mover(id, -1), descer: () => mover(id, 1),
     ciclarSit: () => { const x = S.estoque.find(y => y.id === id); if (x) mudar('estoque', id, {situacao: SIT[(SIT.indexOf(x.situacao) + 1) % SIT.length]}); },
     corNaLista: () => { const x = S.estoque.find(y => y.id === id); formCompra(null, {item: 'Novelo ' + (x?.cor || '').toLowerCase(), tipo: 'Novelo', cor: x?.cor, qtd: 1, precoUn: C().precoNovelo, pedidoId: ''}); },
@@ -496,7 +603,9 @@ document.addEventListener('change', e => {
   const t = e.target, c = t.dataset.c, id = t.dataset.id;
   if (c === 'status') { const p = ped(id); const patch = {status: t.value}; if (t.value === 'Entregue' && p && !p.entregueEm) patch.entregueEm = hoje(); mudar('pedidos', id, patch, t.value === 'Entregue' ? 'Entregue!' : ''); }
   else if (c === 'pago') mudar('pedidos', id, {pago: t.checked}, t.checked ? 'Marcado como pago' : '');
-  else if (c === 'comprado') mudar('compras', id, {comprado: t.checked, compradoEm: t.checked ? hoje() : ''});
+  else if (c === 'comprado') { const it = S.compras.find(x => x.id === id); if (t.checked && it) comprou([it]); else mudar('compras', id, {comprado: false, compradoEm: ''}); }
+  else if (t.id === 'hexPick') setHex(t.value.toLowerCase());
+  else if (t.id === 'fotoCor' && t.files[0]) { const f = t.files[0]; t.value = ''; corDaFoto(f).then(setHex).catch(() => toast('Não consegui ler a foto.', true)); }
 });
 document.addEventListener('toggle', e => { const t = e.target.dataset && e.target.dataset.t; if (t) S[t] = e.target.open; }, true);
 document.addEventListener('input', e => {
@@ -514,6 +623,25 @@ document.addEventListener('submit', e => {
     mudarMeta('config', {valorHora: num(d.valorHora, 13), precoNovelo: num(d.precoNovelo, 20), miudezas: num(d.miudezas, 0), descontoFamilia: num(d.descontoFamilia, 0) / 100, metaNatal: num(d.metaNatal)}, 'Config salva');
   }
 });
+
+function comprou(lista) {
+  const ids = new Set(lista.map(c => c.id)), msgs = [], est = vivos('estoque'), novos = new Set();
+  for (const c of lista) {
+    mudar('compras', c.id, {comprado: true, compradoEm: hoje()});
+    if (['Novelo', 'Linha de bordado'].includes(c.tipo) && c.cor) {
+      const k = semAcento(c.cor), e = est.find(x => semAcento(x.cor) === k);
+      if (e) { if (e.situacao !== 'Cheio') { mudar('estoque', e.id, {situacao: 'Cheio'}); msgs.push(c.cor + ' cheio no estoque'); } }
+      else if (!novos.has(k)) { novos.add(k); const mx = Math.max(0, ...est.map(x => x.ordem).filter(x => x < 1e6)); criar('estoque', {cor: c.cor, situacao: 'Cheio', ordem: mx + 1 + novos.size, hex: '', lixo: false}); msgs.push(c.cor + ' entrou no estoque'); }
+    }
+  }
+  for (const p of vivos('pedidos').filter(x => x.status === 'Esperando fio')) {
+    const minhas = vivos('compras').filter(c => c.pedidoId === p.id);
+    if (minhas.some(c => ids.has(c.id)) && minhas.every(c => c.comprado || ids.has(c.id))) { mudar('pedidos', p.id, {status: 'Na fila'}); msgs.push(p.nome + ' voltou pra fila'); }
+  }
+  toast(lista.length > 1 ? `${lista.length} itens comprados` + (msgs.length ? ' · ' + msgs.join(' · ') : '') : 'Comprado' + (msgs.length ? ' · ' + msgs.join(' · ') : ''));
+}
+addEventListener('beforeinstallprompt', e => { e.preventDefault(); S.inst = e; agenda(); });
+addEventListener('appinstalled', () => { S.inst = null; toast('App instalado'); agenda(); });
 
 function baixar(nome, data, tipo) {
   const url = URL.createObjectURL(new Blob([data], {type: tipo}));
@@ -567,7 +695,8 @@ function ligar(u) {
     agenda();
   }, err => { console.error(err); toast('Erro ao ler ' + c + ': ' + err.code, true); }));
   subs.push(onSnapshot(metaRef('config'), {includeMetadataChanges: true}, s => { S.rawCfg = s.exists() ? s.data() : null; S.config = {...DEF_CFG, ...(S.rawCfg || {})}; S.pend.config = s.metadata.hasPendingWrites; agenda(); }));
-  subs.push(onSnapshot(metaRef('timer'), s => { S.timer = s.exists() ? s.data() : null; agenda(); }));
+  let primeiro = true;
+  subs.push(onSnapshot(metaRef('timer'), s => { S.timer = s.exists() ? s.data() : null; if (primeiro && rodando() && !location.hash) { S.view = 'timer'; } primeiro = false; agenda(); }));
 }
 
 function init() {

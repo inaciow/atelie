@@ -189,6 +189,35 @@ details.card[open] summary{margin-bottom:0;border-bottom:1px solid var(--line)}
 #sync.off{color:var(--yellow);font-weight:600}
 #sync.ok{color:var(--accent-fg)}
 code{font-family:var(--mono);font-size:85%;background:var(--gray-soft);padding:2px 6px;border-radius:6px}
+.tm{display:flex;flex-direction:column;align-items:center;gap:16px;text-align:center;padding:8px 0 32px}
+.tm-top{width:100%;display:flex;align-items:center;gap:8px}
+.tm-top .sp{flex:1}
+.tm-nome{font-size:24px}
+.tm-clock{font-family:var(--mono);font-size:clamp(56px,17vw,128px);font-weight:600;letter-spacing:-.03em;line-height:1;color:var(--muted);font-variant-numeric:tabular-nums}
+.tm-clock.on{color:var(--ink)}
+.tm-sub{color:var(--muted)}
+.tm-prog{width:min(420px,100%);display:flex;flex-direction:column;gap:6px;font-size:12px;color:var(--muted)}
+.tm-go{width:min(320px,100%);padding:22px;border-radius:999px;border:1px solid #1f23281a;background:var(--accent);color:#fff;font-size:22px;font-weight:600;cursor:pointer;box-shadow:0 1px 0 #1f23281a}
+.tm-go:hover{background:var(--accent-hover)}
+.tm-go.on{background:var(--btn);color:var(--ink);border-color:var(--btn-bd)}
+.tm-go.on:hover{background:var(--btn-hover)}
+.tm-done{width:min(320px,100%);padding:10px}
+.tm-pick{display:flex;flex-direction:column;gap:12px}
+.tm-item{display:flex;align-items:center;gap:12px;width:100%;padding:16px;border:0;border-top:1px solid var(--line);background:var(--surface);color:var(--ink);text-align:left;cursor:pointer}
+.tm-item:first-child{border-top:0}
+.tm-item:hover{background:var(--subtle)}
+.tm-item .grow{flex:1;display:flex;flex-direction:column;gap:2px}
+.tm-t{font-family:var(--mono);font-size:18px;font-variant-numeric:tabular-nums}
+.sw{width:22px;height:22px;border-radius:50%;border:1px solid var(--line);flex:none;background:repeating-linear-gradient(45deg,var(--gray-soft) 0 4px,transparent 4px 8px)}
+.sw.big{width:36px;height:36px}
+.corbox{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.corbox .sp{flex:1}
+.seg{display:inline-flex;border:1px solid var(--btn-bd);border-radius:6px;overflow:hidden}
+.seg button{border:0;background:var(--btn);color:var(--ink);padding:4px 12px;font-size:12px;cursor:pointer}
+.seg button+button{border-left:1px solid var(--btn-bd)}
+.seg button.on{background:var(--surface);font-weight:600;box-shadow:inset 0 -2px 0 var(--accent)}
+.vh{position:absolute;opacity:0;width:1px;height:1px;pointer-events:none}
+label.btn{display:inline-block}
 @media (max-width:640px){
   .acoes{grid-template-columns:1fr 1fr}
   .fgrid{grid-template-columns:1fr}
