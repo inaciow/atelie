@@ -77,7 +77,7 @@ Tudo fica em `users/<seu uid>/` no Firestore:
 
 | Caminho | O que é |
 | --- | --- |
-| `pedidos/<id>` | nome, cliente, contato, tipo, status, prazo, horasEst, preco (0 = brinde), sinal, pago, ordem, pedidoEm, entregueEm, receitaId, passo (em que passo da receita a peça está), lixo |
+| `pedidos/<id>` | nome, cliente, contato, tipo, status, prazo, horasEst, preco (0 = brinde), sinal, pago, ordem, pedidoEm, entregueEm, receitaId, passo (em que passo da receita a peça está), contador e contaPasso (contador do Timer e de quanto em quanto ele conta), lixo |
 | `horas/<id>` | pedidoId, data, horas, inicio, fim, lixo |
 | `compras/<id>` | item, tipo, cor, qtd, precoUn, pedidoId (vazio = estoque), onde, comprado, compradoEm, lixo |
 | `estoque/<id>` | cor, situacao, ordem, hex (cor de verdade, ex. `#c0392b`), lixo |

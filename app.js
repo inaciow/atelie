@@ -1,6 +1,6 @@
 import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js';
 import { getAuth, GoogleAuthProvider, signInWithPopup, signInWithRedirect, getRedirectResult, signInWithCredential, onAuthStateChanged, signOut } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js';
-import { initializeFirestore, persistentLocalCache, persistentMultipleTabManager, collection, doc, onSnapshot, setDoc, updateDoc, deleteDoc, writeBatch } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js';
+import { initializeFirestore, persistentLocalCache, persistentMultipleTabManager, collection, doc, onSnapshot, setDoc, updateDoc, deleteDoc, writeBatch, increment } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js';
 import { cfg } from './cfg.js';
 
 // App Android (pasta android/): o objeto AtelieAndroid só existe dentro dele.
@@ -9,7 +9,7 @@ const andMsg = (t, d) => { try { AND.postMessage(JSON.stringify({t, ...d})); } c
 window.atelieDoAndroid = m => {
   if (m.t === 'token') signInWithCredential(S.auth, GoogleAuthProvider.credential(m.idToken)).catch(e => toast('Não deu pra entrar: ' + (e.code || e.message), true));
   else if (m.t === 'erro') toast(m.msg, true);
-  else if (m.t === 'volume') segPasso(m.k === 'mais' ? 1 : -1);
+  else if (m.t === 'volume') { const ct = S.view === 'timer' && !$('.tm-rec') && $('.tm-conta'); if (ct) contar(ct.dataset.id, m.k === 'mais' ? 1 : -1); else segPasso(m.k === 'mais' ? 1 : -1); }
 };
 window.atelieAtualizou = () => { S.novaVersao = true; tentaRecarregar(); };
 function tentaRecarregar() {
@@ -77,7 +77,8 @@ const NORM = {
   pedidos: (id, d) => ({id, nome: str(d.nome) || '(sem nome)', cliente: str(d.cliente), tipo: TIPOS.includes(d.tipo) ? d.tipo : 'Custom simples',
     status: STATUS.includes(d.status) ? d.status : 'Na fila', prazo: str(d.prazo), horasEst: num(d.horasEst, 0), preco: num(d.preco),
     sinal: num(d.sinal, 0), pago: d.pago === true, contato: str(d.contato), pedidoEm: str(d.pedidoEm), entregueEm: str(d.entregueEm),
-    ordem: num(d.ordem, 1e6), receitaId: str(d.receitaId), passo: num(d.passo, 0), lixo: d.lixo === true}),
+    ordem: num(d.ordem, 1e6), receitaId: str(d.receitaId), passo: num(d.passo, 0),
+    contador: Math.max(0, Math.round(num(d.contador, 0))), contaPasso: Math.max(1, Math.round(num(d.contaPasso, 1))), lixo: d.lixo === true}),
   horas: (id, d) => ({id, data: str(d.data), pedidoId: str(d.pedidoId), horas: num(d.horas, 0), inicio: str(d.inicio), fim: str(d.fim), lixo: d.lixo === true}),
   compras: (id, d) => ({id, item: str(d.item) || '(sem nome)', tipo: TIPOS_COMPRA.includes(d.tipo) ? d.tipo : 'Outro', cor: str(d.cor),
     qtd: num(d.qtd, 1), precoUn: num(d.precoUn, 0), onde: str(d.onde), pedidoId: str(d.pedidoId), comprado: d.comprado === true,
@@ -545,6 +546,32 @@ function vSeguir() {
       <p class="hint">Toque no passo pra avançar.${AND ? ' Volume +: avança. Volume −: volta.' : ' No computador: espaço ou → avança, ← volta.'}</p></div>`}
   </div>`;
 }
+// ---- Contador do timer: um por peça, guardado no pedido ----
+function contar(pid, sinal) {
+  const p = ped(pid); if (!p) return;
+  const n = p.contaPasso || 1;
+  if (sinal < 0 && !(p.contador > 0)) return;
+  mudar('pedidos', pid, {contador: increment(sinal < 0 ? -Math.min(n, p.contador) : n)});
+}
+function contaHtml(p) {
+  const n = p.contaPasso || 1, v = p.contador || 0, id = esc(p.id);
+  return `<div class="card tm-conta" data-id="${id}">
+    <div class="tm-conta-top"><span class="small muted">Contador${n > 1 ? ` · de ${n} em ${n}` : ''}</span><span class="sp"></span><button class="btn sm" data-a="contaZerar" data-id="${id}" ${v ? '' : 'disabled'}>Zerar</button></div>
+    <div class="tm-conta-row"><button class="btn tm-conta-menos" data-a="contaMenos" data-id="${id}" ${v ? '' : 'disabled'} aria-label="Menos ${n}">−${n}</button>
+      <button class="tm-conta-n num" data-a="contaEditar" data-id="${id}" aria-label="Contador: ${v}. Toque pra mudar">${v}</button>
+      <button class="btn pri tm-conta-mais" data-a="contaMais" data-id="${id}" aria-label="Mais ${n}">+${n}</button></div>
+    <p class="hint">Fica guardado nesta peça. Toque no número pra escrever um valor ou mudar de quanto em quanto conta.${AND && !passosReceita(rec(p.receitaId)?.texto).length ? ' Volume + e − também contam.' : ''}</p></div>`;
+}
+function formConta(pid) {
+  const p = ped(pid); if (!p) return;
+  abrirModal('Contador de ' + p.nome, `<div class="fgrid">${campo('contador', 'Número', numInp('contador', p.contador || 0, 'min="0" step="1" inputmode="numeric"'))}
+    ${campo('contaPasso', 'Contar de quanto em quanto', numInp('contaPasso', p.contaPasso || 1, 'min="1" step="1" inputmode="numeric"'))}</div>`, {onOk: d => {
+    const v = Math.round(num(d.contador, 0)), n = Math.round(num(d.contaPasso, 1));
+    if (!(v >= 0) || !(n >= 1)) { erroModal('Usa números inteiros: o contador a partir de 0 e o passo a partir de 1.'); return false; }
+    mudar('pedidos', pid, {contador: v, contaPasso: n});
+  }});
+}
+
 function recNoTimer(p) {
   const r = p && rec(p.receitaId), passos = r ? passosReceita(r.texto) : [];
   if (!passos.length) return '';
@@ -765,7 +792,7 @@ function vTimer() {
   if (!p) {
     const at = ativosOrd().filter(x => x.status !== 'Pronto');
     return `<div class="tm-pick"><h2>Em qual peça você vai trabalhar?</h2>
-      <div class="lista">${at.length ? at.map(x => `<button class="tm-item" data-a="tmEscolher" data-id="${esc(x.id)}"><span class="grow"><b>${esc(x.nome)}</b><span class="small muted">${esc(x.status)}${x.horasEst ? ' · estimado ' + fH(x.horasEst) : ''}</span></span>
+      <div class="lista">${at.length ? at.map(x => `<button class="tm-item" data-a="tmEscolher" data-id="${esc(x.id)}"><span class="grow"><b>${esc(x.nome)}</b><span class="small muted">${esc(x.status)}${x.horasEst ? ' · estimado ' + fH(x.horasEst) : ''}${x.contador ? ' · contador ' + x.contador : ''}</span></span>
         <span class="num tm-t" ${run && S.timer.pedidoId === x.id ? 'data-clk="total"' : ''}>${fT(segTotal(x))}</span>${run && S.timer.pedidoId === x.id ? '<span class="pill t-pronta">rodando</span>' : ''}</button>`).join('') : '<div class="empty">Nenhuma peça na fila. Cria um pedido primeiro.</div>'}</div></div>`;
   }
   const aqui = run && S.timer.pedidoId === p.id, outro = run && !aqui;
@@ -779,6 +806,7 @@ function vTimer() {
     ${outro ? `<p class="aviso small">O timer está rodando em <b>${esc(nomePed(S.timer.pedidoId))}</b>. Começar aqui pausa lá e salva o tempo.</p>` : ''}
     <button class="tm-go ${aqui ? 'on' : ''}" data-a="tmToggle" data-id="${esc(p.id)}">${aqui ? 'Pausar' : tot > 0 ? 'Continuar' : 'Começar'}</button>
     <button class="btn tm-done" data-a="tmTerminei" data-id="${esc(p.id)}">Terminei</button>
+    ${contaHtml(p)}
     ${recNoTimer(p)}
   </div>`;
 }
@@ -985,7 +1013,7 @@ function render() {
   if (S.user === false) { m.innerHTML = vLogin(); return; }
   m.innerHTML = VIEW_FN[S.view]();
   tela(querTela());
-  andVolume(!!(S.view === 'seguir' || (S.view === 'timer' && $('.tm-rec'))) && !!segCtx() && !S.segLista);
+  andVolume((!!(S.view === 'seguir' || (S.view === 'timer' && $('.tm-rec'))) && !!segCtx() && !S.segLista) || (S.view === 'timer' && !$('.tm-rec') && !!$('.tm-conta')));
 }
 let rq = false;
 function agenda() { fhMemo = undefined; andTimer(); if (rq) return; rq = true; requestAnimationFrame(() => { rq = false; render(); }); }
@@ -1021,6 +1049,8 @@ document.addEventListener('click', e => {
     novoPedido: () => formPedido(), editPedido: () => formPedido(id), lancarHoras: () => formHoras(id), editHoras: () => formHoras(null, id),
     novaCompra: () => formCompra(), editCompra: () => formCompra(id), novaCor: () => formCor(), editCor: () => formCor(id),
     novaReceita: () => formReceita(), editReceita: () => formReceita(id), pedidoReceita: () => formDaReceita(id),
+    contaMais: () => contar(id, 1), contaMenos: () => contar(id, -1), contaEditar: () => formConta(id),
+    contaZerar: () => { const p = ped(id); if (p && p.contador) confirmar('Zerar o contador?', `${esc(p.nome)} está em <b>${p.contador}</b>.`, 'Zerar', () => mudar('pedidos', id, {contador: 0})); },
     segReceita: () => segReceita(id), segPedido: () => { const p = ped(id); if (p) segAbre(p.receitaId, p.id); },
     segAbrir: () => { fecharModal(); segAbre(b.dataset.rid, id); }, segProx: () => segPasso(1), segAnt: () => segPasso(-1),
     segIr: () => { S.segLista = false; segIr(+b.dataset.i); window.scrollTo(0, 0); },
@@ -1044,6 +1074,9 @@ $('#sair').addEventListener('click', () => confirmar('Sair da conta?', 'Neste ap
 document.addEventListener('keydown', e => {
   if (e.key === 'Escape' && !$('#modal').hidden) fecharModal();
   if (e.key === 'Enter' && e.target.matches('h3[data-a]')) e.target.click();
+  if (S.view === 'timer' && $('#modal').hidden && $('.tm-conta') && ['+', '=', '-'].includes(e.key) && !/INPUT|TEXTAREA|SELECT/.test(document.activeElement?.tagName || '')) {
+    e.preventDefault(); contar($('.tm-conta').dataset.id, e.key === '-' ? -1 : 1);
+  }
   if (S.view === 'seguir' && $('#modal').hidden && !/INPUT|TEXTAREA|SELECT/.test(document.activeElement?.tagName || '') && !e.ctrlKey && !e.metaKey && !e.altKey) {
     const botao = /BUTTON|A/.test(document.activeElement?.tagName || '') && [' ', 'Enter'].includes(e.key);
     if (botao) return;
